@@ -36,7 +36,7 @@ app.get("/health", (_req: Request, res: Response) => {
     x402Enabled: true,
     paymentToken: "SOL",
     requiredAmount: parseInt(process.env.X402_PAYMENT_AMOUNT_LAMPORTS ?? "10000000", 10),
-    magicblockEnabled: Boolean(process.env.MAGICBLOCK_API_KEY),
+    magicblockEnabled: Boolean(process.env.PLATFORM_WALLET_PRIVATE_KEY),
     network: process.env.SOLANA_NETWORK ?? "devnet",
     uptime: process.uptime(),
   });
@@ -216,7 +216,7 @@ app.use(globalErrorHandler);
 app.listen(PORT, () => {
   logger.info(`Backend API listening on port ${PORT}`, {
     network: process.env.SOLANA_NETWORK ?? "devnet",
-    magicblock: Boolean(process.env.MAGICBLOCK_API_KEY),
+    magicblock: Boolean(process.env.PLATFORM_WALLET_PRIVATE_KEY),
   });
 });
 
