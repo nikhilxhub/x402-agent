@@ -1,4 +1,4 @@
-# x402-umbra
+# AgentX402
 
 A **pay-per-prompt AI gateway** built on the x402 payment protocol. Users pay SOL on Solana per request, and the backend routes prompts to multiple AI providers (Claude, GPT-4o, Gemini, Llama). Payments are settled privately through MagicBlock's TEE layer.
 
@@ -121,7 +121,7 @@ MagicBlock is a **privacy layer for Solana payments**. It uses a TEE (Trusted Ex
 
 ### Why is it used here?
 
-In x402-umbra, when a user pays SOL for an AI request, the backend splits that payment:
+In AgentX402, when a user pays SOL for an AI request, the backend splits that payment:
 - **80%** goes to the API key holder (the person who registered their key)
 - **20%** stays with the platform wallet (you, the operator)
 

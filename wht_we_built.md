@@ -1,4 +1,4 @@
-# What We Built — x402-umbra
+# What We Built — AgentX402
 
 ---
 
@@ -62,7 +62,7 @@ x402 can work in two different ways for monetization. Both are implemented in th
 
 ## The Big Idea
 
-**x402-umbra is a pay-per-prompt AI gateway that runs on Solana.**
+**AgentX402 is a pay-per-prompt AI gateway that runs on Solana.**
 
 Instead of signing up, creating accounts, or managing subscriptions — users just send a small amount of SOL and get an AI response back. No accounts. No passwords. No billing portal. Just a wallet, a payment, and a prompt.
 
@@ -102,7 +102,7 @@ This is what the `x-payment` header is for in every `/api/chat` request. It's th
 ## Folder Structure
 
 ```
-x402-umbra/
+AgentX402/
 ├── apps/
 │   ├── backend/          ← the Express API server (main thing we built)
 │   │   └── src/

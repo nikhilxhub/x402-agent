@@ -29,12 +29,12 @@ const MAGICBLOCK_NETWORK = (process.env.MAGICBLOCK_NETWORK ?? "devnet") as "main
 
 // USDC mint addresses (MagicBlock's defaults from their API spec)
 // Mainnet: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v  (official USDC)
-// Devnet:  4zMMC9srt5Ri5X14YQuhg8UTZMMzDdKhmkZMECCzk57   (MagicBlock devnet USDC)
+// Devnet:  4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU   (MagicBlock devnet USDC)
 const MAGICBLOCK_USDC_MINT =
   process.env.MAGICBLOCK_USDC_MINT ??
   (MAGICBLOCK_NETWORK === "mainnet"
     ? "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-    : "4zMMC9srt5Ri5X14YQuhg8UTZMMzDdKhmkZMECCzk57");
+    : "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 
 const PLATFORM_FEE_RATIO = 0.2; // 20% platform fee
 const KEY_HOLDER_RATIO = 0.8;   // 80% to API key holder
@@ -87,7 +87,7 @@ export async function settlePayment(
         fromBalance: "base",
         toBalance: "base",
         cluster: MAGICBLOCK_NETWORK,
-        memo: "x402-umbra-settlement",
+        memo: "agentx402-settlement",
         initIfMissing: true,
         initAtasIfMissing: true,
       }),
