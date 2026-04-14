@@ -4,7 +4,7 @@ import { settlePayment, SettlementResult } from "../magicBlockPayments";
 import { routeAiRequest, AiRequestOptions } from "./aiService";
 import { GenerationResult } from "../aiProviders";
 import {
-  selectApiKey,
+  getKeyEarnings,
   recordEarnings,
 } from "./keyManagementService";
 import { logger } from "../utils/logger";
@@ -81,28 +81,27 @@ export async function processChatRequest(
   const payment: PaymentVerificationResult = await verifyX402Payment(xPaymentHeader);
   analytics.x402ProcessedPayments += 1;
 
-  // 2. Find an available API key holder (they provide the actual API keys for AI calls)
-  const apiKey = selectApiKey(aiOptions.modelId);
-  if (!apiKey) {
-    throw new ServiceUnavailableError(
-      "No registered API keys available. Please try again later."
-    );
-  }
-
-  // 3. Call AI
+  // 2. Call AI — aiService tries all user keys (healthiest first) then platform fallback.
+  //    usedKeyHash is set when a user-registered key was actually used.
   const aiResult: GenerationResult = await routeAiRequest(aiOptions);
 
-  // 4. Settle payment via MagicBlock
+  // 3. Resolve the key holder for earnings attribution
+  const keyRecord = aiResult.usedKeyHash ? getKeyEarnings(aiResult.usedKeyHash) : null;
+
+  // 4. Settle payment — key holder earns 80%, platform keeps all if no user key was used
   const totalSol = PAYMENT_AMOUNT_LAMPORTS / LAMPORTS_PER_SOL;
+  const recipientWallet = keyRecord?.ownerWallet ?? process.env.PLATFORM_WALLET ?? payment.payer;
   const settlement: SettlementResult = await settlePayment(
     consumerWallet ?? payment.payer,
-    apiKey.ownerWallet,
+    recipientWallet,
     totalSol
   );
 
-  // 5. Record earnings for the key holder (80% in lamports)
-  const earningsLamports = BigInt(Math.floor(PAYMENT_AMOUNT_LAMPORTS * 0.8));
-  recordEarnings(apiKey.keyHash, earningsLamports);
+  // 5. Record earnings for the key holder (80% in lamports) if a user key was used
+  if (keyRecord) {
+    const earningsLamports = BigInt(Math.floor(PAYMENT_AMOUNT_LAMPORTS * 0.8));
+    recordEarnings(keyRecord.keyHash, earningsLamports);
+  }
 
   // 6. Update analytics
   analytics.totalRequests += 1;
@@ -121,7 +120,7 @@ export async function processChatRequest(
     costUsd: aiResult.costUsd,
     paymentSignature: payment.transactionSignature,
     settlementSignature: settlement.settlementSignature,
-    apiKeyHash: apiKey.keyHash,
+    apiKeyHash: keyRecord?.keyHash ?? "platform",
     timestamp,
   };
   requestHistory.push(record);

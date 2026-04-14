@@ -4,7 +4,8 @@
       "Bash(ls D:/web3projects/test/x402-umbra/*.md)",
       "WebFetch(domain:payments.magicblock.app)",
       "WebFetch(domain:docs.magicblock.gg)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(npx tsc:*)"
     ]
   }
 }

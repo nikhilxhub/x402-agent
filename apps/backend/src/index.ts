@@ -6,7 +6,8 @@ import { logger } from "./utils/logger";
 import { processChatRequest } from "./services/paymentService";
 import { analytics, requestHistory } from "./services/paymentService";
 import { registerApiKey, getKeyEarnings } from "./services/keyManagementService";
-import { AVAILABLE_MODELS } from "./aiProviders";
+import { AVAILABLE_MODELS, getActiveModels, getModelById, isProviderKeySet } from "./aiProviders";
+import { getModelsWithUserKeys } from "./services/keyManagementService";
 
 const app: Application = express();
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -36,6 +37,7 @@ app.get("/health", (_req: Request, res: Response) => {
     x402Enabled: true,
     paymentToken: "SOL",
     requiredAmount: parseInt(process.env.X402_PAYMENT_AMOUNT_LAMPORTS ?? "10000000", 10),
+    recipientWallet: process.env.PLATFORM_WALLET ?? null,
     magicblockEnabled: Boolean(process.env.PLATFORM_WALLET_PRIVATE_KEY),
     network: process.env.SOLANA_NETWORK ?? "devnet",
     uptime: process.uptime(),
@@ -131,6 +133,9 @@ app.get("/api/keys/:keyHash/earnings", (req: Request, res: Response, next: NextF
       dailyRequestCount: record.dailyRequestCount,
       dailyRequestLimit: record.dailyRequestLimit,
       isActive: record.isActive,
+      consecutiveFailures: record.consecutiveFailures,
+      blacklisted: record.blacklistedAt !== null,
+      blacklistedAt: record.blacklistedAt,
       createdAt: record.createdAt,
     });
   } catch (err) {
@@ -140,19 +145,23 @@ app.get("/api/keys/:keyHash/earnings", (req: Request, res: Response, next: NextF
 
 /**
  * GET /api/providers
- * List all configured AI providers and their status.
+ * List providers that are actually usable right now:
+ *  - platform providers where the .env key is set
+ *  - providers unlocked by a user-registered key
  */
 app.get("/api/providers", (_req: Request, res: Response) => {
+  const visibleModels = resolveVisibleModels();
   const providerMap: Record<
     string,
-    { id: string; enabled: boolean; models: string[]; pricing: { input: number; output: number }; tags: string[] }
+    { id: string; enabled: boolean; source: string; models: string[]; pricing: { input: number; output: number }; tags: string[] }
   > = {};
 
-  for (const m of AVAILABLE_MODELS) {
+  for (const { model: m, source } of visibleModels) {
     if (!providerMap[m.provider]) {
       providerMap[m.provider] = {
         id: m.provider,
         enabled: true,
+        source,
         models: [],
         pricing: { input: m.costPerKInput, output: m.costPerKOutput },
         tags: getProviderTags(m.provider),
@@ -166,14 +175,17 @@ app.get("/api/providers", (_req: Request, res: Response) => {
 
 /**
  * GET /api/models
- * List all available models.
+ * Returns only models that can actually be called right now:
+ *  - platform models where the .env key is set  (source: "platform")
+ *  - models unlocked by a user-registered key   (source: "user-provided")
  */
 app.get("/api/models", (_req: Request, res: Response) => {
   res.json(
-    AVAILABLE_MODELS.map((m) => ({
+    resolveVisibleModels().map(({ model: m, source }) => ({
       id: m.id,
       name: m.name,
       provider: m.provider,
+      source,
       costPerK: { input: m.costPerKInput, output: m.costPerKOutput },
     }))
   );
@@ -235,4 +247,31 @@ function getProviderTags(provider: string): string[] {
     default:
       return [];
   }
+}
+
+/**
+ * Builds the unified list of models visible to callers:
+ *  - platform models where the .env key is present
+ *  - models in AVAILABLE_MODELS that have at least one active user-registered key
+ *    (de-duplicated; platform takes precedence on source label)
+ */
+function resolveVisibleModels(): Array<{ model: ReturnType<typeof getModelById> extends undefined ? never : NonNullable<ReturnType<typeof getModelById>>; source: "platform" | "user-provided" }> {
+  const result: Array<{ model: NonNullable<ReturnType<typeof getModelById>>; source: "platform" | "user-provided" }> = [];
+  const seen = new Set<string>();
+
+  for (const m of getActiveModels()) {
+    result.push({ model: m, source: "platform" });
+    seen.add(m.id);
+  }
+
+  for (const modelId of getModelsWithUserKeys()) {
+    if (seen.has(modelId)) continue; // already listed as platform model
+    const def = getModelById(modelId);
+    if (def) {
+      result.push({ model: def, source: "user-provided" });
+      seen.add(modelId);
+    }
+  }
+
+  return result;
 }

@@ -7,21 +7,18 @@
  *  - Google (Gemini)       — @ai-sdk/google
  *  - Together.ai (Llama)   — @ai-sdk/openai with custom base URL
  */
-import { anthropic } from "@ai-sdk/anthropic";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText, LanguageModel } from "ai";
 import { logger } from "./utils/logger";
 
-const googleClient = createGoogleGenerativeAI({
-  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "",
-});
+// ── Platform clients (use .env keys) ─────────────────────────────────────────
+const anthropicClient = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? "" });
+const openaiClient    = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? "" });
 
-// Together.ai exposes an OpenAI-compatible endpoint
-const togetherClient = createOpenAI({
-  baseURL: "https://api.together.xyz/v1",
-  apiKey: process.env.TOGETHER_API_KEY ?? "",
-});
+const googleClient   = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "" });
+const togetherClient = createOpenAI({ baseURL: "https://api.together.xyz/v1", apiKey: process.env.TOGETHER_API_KEY ?? "" });
 
 export interface ModelDefinition {
   id: string;
@@ -39,7 +36,7 @@ export const AVAILABLE_MODELS: ModelDefinition[] = [
     provider: "claude",
     costPerKInput: 0.015,
     costPerKOutput: 0.075,
-    model: anthropic("claude-opus-4-20250514"),
+    model: anthropicClient("claude-opus-4-20250514"),
   },
   {
     id: "claude-sonnet-4-6",
@@ -47,7 +44,7 @@ export const AVAILABLE_MODELS: ModelDefinition[] = [
     provider: "claude",
     costPerKInput: 0.003,
     costPerKOutput: 0.015,
-    model: anthropic("claude-sonnet-4-6"),
+    model: anthropicClient("claude-sonnet-4-6"),
   },
   {
     id: "gpt-4o",
@@ -55,7 +52,7 @@ export const AVAILABLE_MODELS: ModelDefinition[] = [
     provider: "openai",
     costPerKInput: 0.005,
     costPerKOutput: 0.015,
-    model: createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? "" })("gpt-4o"),
+    model: openaiClient("gpt-4o"),
   },
   {
     id: "gpt-4o-mini",
@@ -63,7 +60,7 @@ export const AVAILABLE_MODELS: ModelDefinition[] = [
     provider: "openai",
     costPerKInput: 0.00015,
     costPerKOutput: 0.0006,
-    model: createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? "" })("gpt-4o-mini"),
+    model: openaiClient("gpt-4o-mini"),
   },
   {
     id: "gemini-2.5-pro",
@@ -109,6 +106,8 @@ export interface GenerationResult {
     total: number;
   };
   costUsd: number;
+  /** Hash of the user-registered key that was used, if any. Undefined = platform key was used. */
+  usedKeyHash?: string;
 }
 
 /**
@@ -167,4 +166,42 @@ export function getCheapestModel(): ModelDefinition {
     const cheapestCombined = cheapest.costPerKInput + cheapest.costPerKOutput;
     return combined < cheapestCombined ? m : cheapest;
   });
+}
+
+/** True if the platform has a non-empty .env key for this provider. */
+export function isProviderKeySet(provider: ModelDefinition["provider"]): boolean {
+  switch (provider) {
+    case "claude":   return !!process.env.ANTHROPIC_API_KEY?.trim();
+    case "openai":   return !!process.env.OPENAI_API_KEY?.trim();
+    case "google":   return !!process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
+    case "together": return !!process.env.TOGETHER_API_KEY?.trim();
+  }
+}
+
+/**
+ * Models the platform can call using its own .env keys.
+ * This is the base "available" list shown to callers with no registered key.
+ */
+export function getActiveModels(): ModelDefinition[] {
+  return AVAILABLE_MODELS.filter(m => isProviderKeySet(m.provider));
+}
+
+/**
+ * Build a LanguageModel instance using a caller-supplied raw API key.
+ * Used when a user has registered their own key for a model.
+ * Returns null if the modelId is not in AVAILABLE_MODELS.
+ */
+export function buildModelWithKey(modelId: string, rawApiKey: string): LanguageModel | null {
+  const def = AVAILABLE_MODELS.find(m => m.id === modelId);
+  if (!def) return null;
+  switch (def.provider) {
+    case "claude":
+      return createAnthropic({ apiKey: rawApiKey })(modelId);
+    case "openai":
+      return createOpenAI({ apiKey: rawApiKey })(modelId);
+    case "google":
+      return createGoogleGenerativeAI({ apiKey: rawApiKey })(modelId);
+    case "together":
+      return createOpenAI({ baseURL: "https://api.together.xyz/v1", apiKey: rawApiKey })(modelId);
+  }
 }
