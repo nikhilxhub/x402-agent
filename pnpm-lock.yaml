@@ -18,6 +18,46 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
+  apps/admin:
+    dependencies:
+      '@repo/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@solana/web3.js':
+        specifier: ^1.98.0
+        version: 1.98.4(bufferutil@4.1.0)(typescript@5.9.2)(utf-8-validate@6.0.6)
+      next:
+        specifier: 16.2.0
+        version: 16.2.0(@opentelemetry/api@1.9.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      react:
+        specifier: ^19.2.0
+        version: 19.2.0
+      react-dom:
+        specifier: ^19.2.0
+        version: 19.2.0(react@19.2.0)
+    devDependencies:
+      '@repo/eslint-config':
+        specifier: workspace:*
+        version: link:../../packages/eslint-config
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../../packages/typescript-config
+      '@types/node':
+        specifier: ^22.15.3
+        version: 22.15.3
+      '@types/react':
+        specifier: 19.2.2
+        version: 19.2.2
+      '@types/react-dom':
+        specifier: 19.2.2
+        version: 19.2.2(@types/react@19.2.2)
+      eslint:
+        specifier: ^9.39.1
+        version: 9.39.1
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
   apps/backend:
     dependencies:
       '@ai-sdk/anthropic':

@@ -1,0 +1,24 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model ApiKey {
+  id              String   @id @default(cuid())
+  api_key         String   @unique
+  owner_sol       String   // solana address that receives payments for this API key / model
+  rate_per_request Int     // rate in lamports (1 SOL = 1e9 lamports). store lamports for precision
+  ai_model        String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
