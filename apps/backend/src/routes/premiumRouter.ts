@@ -1,4 +1,4 @@
-import { Request, Response, Router } from "express";
+import express, { Request, Response, Router } from "express";
 import { validatePremiumBody } from "../middleware/requestValidation";
 
 import { findApiKeyToModel2 } from "../db/prisma";
@@ -11,7 +11,7 @@ export const premiumRouter: Router = Router();
 premiumRouter.post(
   "/",
   validatePremiumBody,
-  async (req: Request, res: Response) => {
+  async (req: express.Request, res: express.Response) => {
     try {
       const { model, prompt } = req.body;
 
