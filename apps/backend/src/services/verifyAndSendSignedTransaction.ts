@@ -92,28 +92,52 @@ export async function verifyAndSendSignedTransaction(params: {
 
     // Simulate
     console.log("Simulating transaction...");
-    const simulation = await connection.simulateTransaction(versionedTx);
-    // const simulation = await connection.simulateTransaction(tx);
+    let simulation: any = null;
+    let isAlreadyProcessed = false;
 
-    if (simulation.value.err) {
+    try {
+      simulation = await connection.simulateTransaction(versionedTx);
+      
+      // Check if simulation failed because it's already processed (in the return value)
+      if (simulation.value.err && JSON.stringify(simulation.value.err).toLowerCase().includes("already been processed")) {
+        isAlreadyProcessed = true;
+      }
+    } catch (err: any) {
+      // Check if it failed because it's already processed (as a thrown exception)
+      if (err.message && err.message.toLowerCase().includes("already been processed")) {
+        console.log("Simulation threw 'already processed' error. Handling gracefully.");
+        isAlreadyProcessed = true;
+      } else {
+        // Rethrow if it's some other simulation error
+        throw err;
+      }
+    }
 
-          console.log("logs:...", simulation.value.err);
-    console.log("logs:...", simulation.value.logs);
+    let signature: string;
+
+    if (isAlreadyProcessed) {
+      console.log("Transaction already processed on-chain. Skipping send step and jumping to verification.");
+      // Derive signature from the signed transaction
+      const legacyTx = Transaction.from(paymentData);
+      signature = bs58.encode(legacyTx.signatures[0]!.signature!);
+    } else if (simulation?.value.err) {
+      console.log("logs:...", simulation.value.err);
+      console.log("logs:...", simulation.value.logs);
       return {
         success: false,
         reason: "simulation_failed..",
         details: simulation.value.err,
         logs: simulation.value.logs,
       };
+    } else {
+      console.log("Simulation successful....");
+      signature = await connection.sendRawTransaction(paymentData, {
+        skipPreflight: false,
+        preflightCommitment: "confirmed",
+      });
     }
 
-
-    console.log("Simulation successful....");
-
-    const signature = await connection.sendRawTransaction(paymentData, {
-      skipPreflight: false,
-      preflightCommitment: "confirmed",
-    });
+    console.log("Directing to confirmation/verification for signature:", signature);
 
     const confirmation = await connection.confirmTransaction(
       signature,
@@ -121,6 +145,7 @@ export async function verifyAndSendSignedTransaction(params: {
     );
 
     if (confirmation.value.err) {
+      console.error("Confirmation error:", confirmation.value.err);
       return {
         success: false,
         reason: "transaction_failed_on_chain",
@@ -129,17 +154,32 @@ export async function verifyAndSendSignedTransaction(params: {
       };
     }
 
-    // Verify post-confirmation balances
-    console.log("Verifying the tx postt confirmation...");
+    // Verify post-confirmation balances with retry logic for indexing lag
+    console.log("Verifying the tx post confirmation (checking for indexing lag)...");
 
+    let confirmedTx = null;
+    const maxRetries = 5;
+    const retryDelay = 2000;
 
-    const confirmedTx = await connection.getTransaction(signature, {
-      commitment: "confirmed",
-    });
+    for (let i = 0; i < maxRetries; i++) {
+      confirmedTx = await connection.getTransaction(signature, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+
+      if (confirmedTx) break;
+
+      if (i < maxRetries - 1) {
+        console.log(`Indexing lag detected. Retrying fetch (${i + 1}/${maxRetries})...`);
+        await new Promise((res) => setTimeout(res, retryDelay));
+      }
+    }
+
     if (!confirmedTx) {
+      console.error("Failed to fetch transaction after retries.");
       return {
         success: false,
-        reason: "could_not_fetch_confirmed_transaction",
+        reason: "could_not_fetch_confirmed_transaction_indexing_lag",
         signature,
       };
     }

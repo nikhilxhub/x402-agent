@@ -13,6 +13,7 @@ import {
   truncateAddress, 
   serializeTransactionToBase64 
 } from "./utils";
+import { useWallet } from "../providers/WalletProvider";
 
 // --- Configuration ---
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3000";
@@ -55,10 +56,9 @@ declare global {
 
 export default function Home() {
   // --- UI State ---
+  const { wallet, isConnecting, connectWallet, provider } = useWallet();
   const [isBooting, setIsBooting] = useState(true);
   const [backendOnline, setBackendOnline] = useState(false);
-  const [wallet, setWallet] = useState<string>("");
-  const [isConnecting, setIsConnecting] = useState(false);
   
   // --- Form State ---
   const [prompt, setPrompt] = useState("");
@@ -70,8 +70,6 @@ export default function Home() {
   // --- Flow State ---
   const [paymentQuote, setPaymentQuote] = useState<PaymentRequest | null>(null);
   const [result, setResult] = useState<AIResponse | null>(null);
-
-  const provider = typeof window !== "undefined" ? window.solana : undefined;
 
   // --- Initialization ---
   useEffect(() => {
@@ -87,29 +85,7 @@ export default function Home() {
       }
     }
     checkHealth();
-
-    if (provider?.publicKey) {
-      setWallet(provider.publicKey.toBase58());
-    }
-  }, [provider]);
-
-  // --- Actions ---
-  async function connectWallet() {
-    if (!provider?.isPhantom) {
-      setError("Please install Phantom wallet to use this Dapp.");
-      return;
-    }
-    setIsConnecting(true);
-    setError("");
-    try {
-      const resp = await provider.connect();
-      setWallet(resp.publicKey.toBase58());
-    } catch (err: any) {
-      setError(err.message || "Failed to connect wallet");
-    } finally {
-      setIsConnecting(false);
-    }
-  }
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -177,7 +153,8 @@ export default function Home() {
 
       const finalData = await finalRes.json();
       if (!finalRes.ok) {
-        throw new Error(finalData.error || "Payment verification or AI processing failed");
+        const detailMsg = finalData.details ? `: ${JSON.stringify(finalData.details)}` : "";
+        throw new Error(`${finalData.error || "Payment verification or AI processing failed"}${detailMsg}`);
       }
 
       setResult(finalData as AIResponse);
@@ -229,24 +206,6 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="mb-8 pb-8 border-b border-white/5">
-              {!wallet ? (
-                <button 
-                  className="bg-white text-black hover:bg-[#ededed] active:scale-95 transition-all px-6 py-2.5 rounded-xl font-bold text-sm disabled:opacity-50" 
-                  onClick={connectWallet}
-                  disabled={isConnecting}
-                >
-                  {isConnecting ? "Connecting..." : "Connect Wallet"}
-                </button>
-              ) : (
-                <div className="flex items-center justify-between text-sm">
-                  <div className="font-mono bg-white/[0.05] border border-white/5 px-3 py-1.5 rounded-lg text-[#a0a0a0]">
-                    {truncateAddress(wallet)}
-                  </div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#3b82f6] bg-[#3b82f6]/10 px-2 py-1 rounded">Devnet</span>
-                </div>
-              )}
-            </div>
 
             <form className="flex flex-col gap-8" onSubmit={handleSubmit}>
               <div className="space-y-2">
