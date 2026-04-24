@@ -5,7 +5,10 @@
       "WebFetch(domain:payments.magicblock.app)",
       "WebFetch(domain:docs.magicblock.gg)",
       "WebSearch",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(grep \"\\\\.d\\\\.ts$\")",
+      "Bash(pnpm exec *)",
+      "WebFetch(domain:sdk.umbraprivacy.com)"
     ]
   }
 }

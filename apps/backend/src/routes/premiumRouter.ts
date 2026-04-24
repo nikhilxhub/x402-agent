@@ -1,94 +1,141 @@
-import express, { Request, Response, Router } from "express";
+import express, { Router } from "express";
 import { validatePremiumBody } from "../middleware/requestValidation";
-
 import { findApiKeyToModel2 } from "../db/prisma";
-
 import { createPaymentRequest } from "../services/paymentService";
 import { verifyAndSendSignedTransaction } from "../services/verifyAndSendSignedTransaction";
 import { callModel_Api } from "../services/aiService";
+import { createUmbraQuote, verifyUmbraPayment } from "../services/umbraService";
+import { ENV } from "../config/env";
+
 export const premiumRouter: Router = Router();
 
-premiumRouter.post(
-  "/",
-  validatePremiumBody,
-  async (req: express.Request, res: express.Response) => {
-    try {
-      const { model, prompt } = req.body;
+premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: express.Response) => {
+  try {
+    const { model, prompt, paymentMethod = "standard" } = req.body;
 
-      if (!prompt) {
-        return res.status(404).json({
-          error: "prompt required",
+    const apiKeyEntry = await findApiKeyToModel2(model);
+    if (!apiKeyEntry) {
+      return res.status(404).json({ error: "model/api key not found" });
+    }
+
+    const receiver = apiKeyEntry.owner_sol;
+    const rateLamports = apiKeyEntry.rate_per_request;
+    const rateUsdc = apiKeyEntry.rate_per_request_usdc;
+    const aiModel = apiKeyEntry.ai_model;
+    const api_key = apiKeyEntry.api_key;
+
+    if (paymentMethod === "umbra") {
+      const quoteId = (req.headers["x402-quote-id"] as string) || null;
+
+      if (!quoteId) {
+        const quote = createUmbraQuote({
+          receiver,
+          baseAmountAtomic: rateUsdc,
+        });
+
+        return res.status(402).json({
+          message: "Private payment required",
+          paymentRequest: createPaymentRequest({
+            receiver,
+            amountLamports: quote.amountAtomic,
+            memo: `private payment for model:${aiModel}`,
+            expiresInSec: 300,
+            paymentMethod: "umbra",
+            currency: "USDC",
+            quoteId: quote.quoteId,
+            umbra: {
+              mint: ENV.UMBRA_MINT_ADDRESS,
+              network: ENV.UMBRA_NETWORK,
+              indexerApiEndpoint: ENV.UMBRA_INDEXER_API_ENDPOINT,
+              treeIndex: ENV.UMBRA_TREE_INDEX,
+            },
+          }),
         });
       }
 
-      // bring api-key
+      const umbraVerification = await verifyUmbraPayment({
+        quoteId,
+        expectedReceiver: receiver,
+      });
 
-      const apiKeyEntry = await findApiKeyToModel2(model);
-
-      if (!apiKeyEntry) {
-        return res.status(404).json({ error: "model/api key not found" });
+      if (!umbraVerification.success) {
+        return res.status(400).json({
+          error: "umbra payment verification failed",
+          details: umbraVerification.reason,
+        });
       }
 
-      const receiver = apiKeyEntry.owner_sol;
-      const rateLamports = apiKeyEntry.rate_per_request;
-      const aiModel = apiKeyEntry.ai_model;
-      const api_key = apiKeyEntry.api_key;
+      const aiResponse = await callModel_Api({
+        model: aiModel,
+        prompt,
+        api_key,
+      });
 
-      // check for signed transaction header
-      const signedTxBase64 = (req.headers["x402-signed-tx"] as string) || null;
+      return res.json({
+        paidTxSignature: `umbra:${umbraVerification.leafIndex}`,
+        ai: aiResponse,
+        payment: {
+          method: "umbra",
+          quoteId: umbraVerification.quoteId,
+          amountAtomic: umbraVerification.amountAtomic,
+          currency: "USDC",
+          destinationAddress: umbraVerification.destinationAddress,
+          leafIndex: umbraVerification.leafIndex,
+          unlockerType: umbraVerification.unlockerType,
+          timestamp: umbraVerification.timestamp,
+        },
+      });
+    }
 
-      if (!signedTxBase64) {
-        const paymentRequest = createPaymentRequest({
+    const signedTxBase64 = (req.headers["x402-signed-tx"] as string) || null;
+    if (!signedTxBase64) {
+      return res.status(402).json({
+        message: "Payment required",
+        paymentRequest: createPaymentRequest({
           receiver,
           amountLamports: rateLamports,
           memo: `payment for model:${aiModel}`,
           expiresInSec: 300,
-        });
-
-        return res.status(402).json({
-          message: "Payment required",
-          paymentRequest,
-        });
-      }
-
-      const verifyResult = await verifyAndSendSignedTransaction({
-        signedTxBase64,
-        expectedReceiver: receiver,
-        expectedAmountLamports: rateLamports,
+          paymentMethod: "standard",
+          currency: "SOL",
+        }),
       });
-
-      if (!verifyResult.success) {
-        return res
-          .status(400)
-          .json({
-            error: "payment verification failed",
-            details: verifyResult.reason,
-          });
-      }
-
-      // Payment successful on-chain — now call the LLM via vercel ai
-      console.log("sending call to model...");
-      
-      const aiResponse = await callModel_Api({
-        model: aiModel,
-        prompt,
-        api_key
-
-      });
-
-      // Log / store usage if desired (omitted for brevity)
-
-      return res.json({
-        paidTxSignature: verifyResult.signature,
-        ai: aiResponse,
-      });
-
-      
-    } catch (err) {
-      console.error("premiumHandler error", err);
-      return res
-        .status(500)
-        .json({ error: "internal_error", details: (err as any).message });
     }
+
+    const verifyResult = await verifyAndSendSignedTransaction({
+      signedTxBase64,
+      expectedReceiver: receiver,
+      expectedAmountLamports: rateLamports,
+    });
+
+    if (!verifyResult.success) {
+      return res.status(400).json({
+        error: "payment verification failed",
+        details: verifyResult.reason,
+      });
+    }
+
+    const aiResponse = await callModel_Api({
+      model: aiModel,
+      prompt,
+      api_key,
+    });
+
+    return res.json({
+      paidTxSignature: verifyResult.signature,
+      ai: aiResponse,
+      payment: {
+        method: "standard",
+        currency: "SOL",
+        amountLamports: rateLamports,
+        receiver,
+        explorerUrl: verifyResult.exploreUrl,
+      },
+    });
+  } catch (err) {
+    console.error("premiumHandler error", err);
+    return res
+      .status(500)
+      .json({ error: "internal_error", details: (err as Error).message });
   }
-);
+});

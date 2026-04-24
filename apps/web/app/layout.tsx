@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Instrument_Sans } from "next/font/google";
 import { WalletProvider } from "../providers/WalletProvider";
 import { Navbar } from "../components/Navbar";

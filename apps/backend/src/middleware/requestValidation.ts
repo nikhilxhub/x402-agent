@@ -3,7 +3,8 @@ import { z, ZodError } from "zod";
 
 const premiumBody = z.object({
   prompt: z.string().min(1, "Prompt required"),
-  model: z.string().min(1, "Model required")
+  model: z.string().min(1, "Model required"),
+  paymentMethod: z.enum(["standard", "umbra"]).optional(),
 });
 
 export function validatePremiumBody(req: Request, res: Response, next: NextFunction) {

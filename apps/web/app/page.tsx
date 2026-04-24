@@ -8,35 +8,53 @@ import {
   Transaction,
   clusterApiUrl,
 } from "@solana/web3.js";
-import { 
-  lamportsToSol, 
-  truncateAddress, 
-  serializeTransactionToBase64 
-} from "./utils";
+import { lamportsToSol, serializeTransactionToBase64 } from "./utils";
 import { useWallet } from "../providers/WalletProvider";
+import { createUmbraPrivatePayment } from "./umbra";
 
-// --- Configuration ---
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3000";
 const RPC_URL = clusterApiUrl("devnet");
 
 const AVAILABLE_MODELS = [
-  { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo", provider: "OpenAI" },
-  { id: "groq", name: "Llama 3 (Groq)", provider: "Groq" },
-  { id: "gemini-2", name: "Gemini 2.0 Flash", provider: "Google" },
-  { id: "gemini-2.5-pro", name: "Gemini 1.5 Pro", provider: "Google" },
-];
+  { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo", provider: "OpenAI", priceSol: "0.001 SOL", priceUsdc: "1.00 USDC" },
+  { id: "groq", name: "Llama 3 (Groq)", provider: "Groq", priceSol: "0.0005 SOL", priceUsdc: "0.50 USDC" },
+  { id: "gemini-2", name: "Gemini 2.0 Flash", provider: "Google", priceSol: "0.0005 SOL", priceUsdc: "0.50 USDC" },
+  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google", priceSol: "0.002 SOL", priceUsdc: "2.00 USDC" },
+] as const;
 
-// --- Types ---
+type PaymentMethod = "standard" | "umbra";
+
 type PaymentRequest = {
   receiver: string;
   amountLamports: number;
   memo: string;
   expiresInSec: number;
+  paymentMethod: PaymentMethod;
+  currency: "SOL" | "USDC";
+  quoteId: string | null;
+  umbra: {
+    mint: string;
+    network: "mainnet" | "devnet" | "localnet";
+    indexerApiEndpoint: string;
+    treeIndex: number;
+  } | null;
 };
 
 type AIResponse = {
   paidTxSignature: string;
   ai: string;
+  payment?: {
+    method: PaymentMethod;
+    currency: "SOL" | "USDC";
+    amountLamports?: number;
+    amountAtomic?: number;
+    receiver?: string;
+    explorerUrl?: string;
+    destinationAddress?: string;
+    leafIndex?: string;
+    timestamp?: string;
+  };
+  viewingKey?: string;
 };
 
 type PhantomProvider = {
@@ -54,24 +72,27 @@ declare global {
   }
 }
 
+function formatQuoteAmount(quote: PaymentRequest) {
+  if (quote.currency === "USDC") {
+    return `${(quote.amountLamports / 1_000_000).toFixed(6)} USDC`;
+  }
+
+  return `${lamportsToSol(quote.amountLamports)} SOL`;
+}
+
 export default function Home() {
-  // --- UI State ---
-  const { wallet, isConnecting, connectWallet, provider } = useWallet();
+  const { wallet, connectWallet, provider } = useWallet();
   const [isBooting, setIsBooting] = useState(true);
   const [backendOnline, setBackendOnline] = useState(false);
-  
-  // --- Form State ---
   const [prompt, setPrompt] = useState("");
-  const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0]!.id);
+  const [selectedModel, setSelectedModel] = useState<string>(AVAILABLE_MODELS[0]!.id);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("standard");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
-  
-  // --- Flow State ---
   const [paymentQuote, setPaymentQuote] = useState<PaymentRequest | null>(null);
   const [result, setResult] = useState<AIResponse | null>(null);
 
-  // --- Initialization ---
   useEffect(() => {
     async function checkHealth() {
       try {
@@ -87,6 +108,67 @@ export default function Home() {
     checkHealth();
   }, []);
 
+  async function handleStandardPayment(paymentRequest: PaymentRequest) {
+    if (!wallet || !provider) {
+      throw new Error("Wallet not connected.");
+    }
+
+    const connection = new Connection(RPC_URL, "confirmed");
+    const fromPubkey = new PublicKey(wallet);
+    const toPubkey = new PublicKey(paymentRequest.receiver);
+    const { blockhash } = await connection.getLatestBlockhash("confirmed");
+
+    const transaction = new Transaction({
+      feePayer: fromPubkey,
+      recentBlockhash: blockhash,
+    }).add(
+      SystemProgram.transfer({
+        fromPubkey,
+        toPubkey,
+        lamports: paymentRequest.amountLamports,
+      })
+    );
+
+    const signedTx = await provider.signTransaction(transaction);
+    const signedTxBase64 = serializeTransactionToBase64(signedTx);
+
+    const finalRes = await fetch(`${BACKEND_URL}/premium`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x402-signed-tx": signedTxBase64,
+      },
+      body: JSON.stringify({ model: selectedModel, prompt, paymentMethod: "standard" }),
+    });
+
+    return finalRes;
+  }
+
+  async function handleUmbraPayment(paymentRequest: PaymentRequest) {
+    const privatePayment = await createUmbraPrivatePayment({
+      paymentRequest,
+      rpcUrl: RPC_URL,
+    });
+
+    const finalRes = await fetch(`${BACKEND_URL}/premium`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x402-quote-id": privatePayment.quoteId,
+      },
+      body: JSON.stringify({ model: selectedModel, prompt, paymentMethod: "umbra" }),
+    });
+
+    const finalData = await finalRes.json();
+    return {
+      response: finalRes,
+      data: {
+        ...finalData,
+        viewingKey: privatePayment.viewingKey,
+      } as AIResponse,
+    };
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!wallet) {
@@ -99,14 +181,13 @@ export default function Home() {
     setError("");
     setResult(null);
     setPaymentQuote(null);
-    setStatus("Initiating request...");
+    setStatus("Requesting payment quote...");
 
     try {
-      // Step 1: Initial call to get payment request
       const initRes = await fetch(`${BACKEND_URL}/premium`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: selectedModel, prompt }),
+        body: JSON.stringify({ model: selectedModel, prompt, paymentMethod }),
       });
 
       if (initRes.status !== 402) {
@@ -116,48 +197,33 @@ export default function Home() {
 
       const { paymentRequest } = (await initRes.json()) as { paymentRequest: PaymentRequest };
       setPaymentQuote(paymentRequest);
-      setStatus("Awaiting signature...");
 
-      // Step 2: Build and Sign Transaction
-      const connection = new Connection(RPC_URL, "confirmed");
-      const fromPubkey = new PublicKey(wallet);
-      const toPubkey = new PublicKey(paymentRequest.receiver);
-      
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      const transaction = new Transaction({
-          feePayer: fromPubkey,
-          recentBlockhash: blockhash,
-      }).add(
-        SystemProgram.transfer({
-          fromPubkey,
-          toPubkey,
-          lamports: paymentRequest.amountLamports,
-        })
-      );
+      if (paymentMethod === "umbra") {
+        setStatus("Creating private Umbra payment...");
+        const { response, data } = await handleUmbraPayment(paymentRequest);
+        if (!response.ok) {
+          const detailMsg = data?.payment ? "" : data ? `: ${JSON.stringify(data)}` : "";
+          throw new Error(`Private payment verification or AI processing failed${detailMsg}`);
+        }
 
-      // Sign locally via provider
-      const signedTx = await provider!.signTransaction(transaction);
-      const signedTxBase64 = serializeTransactionToBase64(signedTx);
-
-      setStatus("Verifying payment...");
-
-      // Step 3: Re-submit with payment proof
-      const finalRes = await fetch(`${BACKEND_URL}/premium`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x402-signed-tx": signedTxBase64,
-        },
-        body: JSON.stringify({ model: selectedModel, prompt }),
-      });
-
-      const finalData = await finalRes.json();
-      if (!finalRes.ok) {
-        const detailMsg = finalData.details ? `: ${JSON.stringify(finalData.details)}` : "";
-        throw new Error(`${finalData.error || "Payment verification or AI processing failed"}${detailMsg}`);
+        setResult(data);
+        setStatus("Completed");
+        return;
       }
 
-      setResult(finalData as AIResponse);
+      setStatus("Awaiting signature...");
+      const finalRes = await handleStandardPayment(paymentRequest);
+      const finalData = (await finalRes.json()) as AIResponse;
+      if (!finalRes.ok) {
+        const detailMsg = (finalData as any).details
+          ? `: ${JSON.stringify((finalData as any).details)}`
+          : "";
+        throw new Error(
+          `${(finalData as any).error || "Payment verification or AI processing failed"}${detailMsg}`
+        );
+      }
+
+      setResult(finalData);
       setStatus("Completed");
     } catch (err: any) {
       setError(err.message || "Request failed");
@@ -167,7 +233,6 @@ export default function Home() {
     }
   }
 
-  // --- Render Helpers ---
   if (isBooting) {
     return (
       <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-center p-8 text-[#a0a0a0]">
@@ -179,7 +244,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#0a0a0a] text-[#f5f5f5] selection:bg-[#3b82f6]/30 px-4 py-12 md:py-20 flex justify-center overflow-x-hidden relative">
-      {/* Dynamic Background Effects */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-20%] left-1/2 -translate-x-1/2 w-full h-[70%] bg-[radial-gradient(circle_at_50%_0%,rgba(59,130,246,0.15),transparent_70%)]"></div>
         <div className="absolute bottom-0 left-0 w-1/2 h-1/2 bg-[radial-gradient(circle_at_0%_100%,rgba(59,130,246,0.05),transparent_50%)]"></div>
@@ -192,7 +256,7 @@ export default function Home() {
             AgentX402
           </h1>
           <p className="text-[#a0a0a0] text-sm sm:text-base max-w-lg mx-auto leading-relaxed">
-            Premium pay-per-request AI inference engine, secured by Solana. Minimal, secure, and entirely decentralized.
+            Pay per prompt with standard Solana transfers or experimental Umbra private payments.
           </p>
         </header>
 
@@ -201,30 +265,62 @@ export default function Home() {
             <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
               <h2 className="text-lg font-semibold tracking-tight">Control Center</h2>
               <div className="flex items-center gap-2 px-3 py-1 bg-white/[0.05] rounded-full border border-white/5">
-                <div className={`w-2 h-2 rounded-full ${backendOnline ? 'bg-[#10b981] shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-[#ef4444]'}`}></div>
+                <div className={`w-2 h-2 rounded-full ${backendOnline ? "bg-[#10b981] shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-[#ef4444]"}`}></div>
                 <span className="text-[10px] font-medium text-[#a0a0a0]">Backend {backendOnline ? "Online" : "Offline"}</span>
               </div>
             </div>
 
-
             <form className="flex flex-col gap-8" onSubmit={handleSubmit}>
               <div className="space-y-2">
+                <label className="text-xs font-semibold text-[#a0a0a0] ml-1">Payment Rail</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    className={`rounded-2xl border px-4 py-3 text-left transition-all ${paymentMethod === "standard" ? "border-[#3b82f6] bg-[#3b82f6]/10" : "border-white/[0.08] bg-white/[0.03]"}`}
+                    onClick={() => setPaymentMethod("standard")}
+                    disabled={isSubmitting}
+                  >
+                    <span className="block text-sm font-semibold">Standard</span>
+                    <span className="block text-[11px] text-white/40 mt-1">Native SOL transfer, fast verification.</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-2xl border px-4 py-3 text-left transition-all ${paymentMethod === "umbra" ? "border-[#10b981] bg-[#10b981]/10" : "border-white/[0.08] bg-white/[0.03]"}`}
+                    onClick={() => setPaymentMethod("umbra")}
+                    disabled={isSubmitting}
+                  >
+                    <span className="block text-sm font-semibold">Private</span>
+                    <span className="block text-[11px] text-white/40 mt-1">Umbra receiver-claimable UTXO with viewing key disclosure.</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
                 <label className="text-xs font-semibold text-[#a0a0a0] ml-1">AI Intelligence Layer</label>
-                <select 
-                  className="w-full bg-white/[0.05] border border-white/[0.08] rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-[#3b82f6] transition-all disabled:opacity-50"
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  disabled={isSubmitting}
-                >
-                  {AVAILABLE_MODELS.map(m => (
-                    <option key={m.id} value={m.id} className="bg-[#1a1a1a]">{m.name} ({m.provider})</option>
+                <div className="grid grid-cols-1 gap-2">
+                  {AVAILABLE_MODELS.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setSelectedModel(m.id)}
+                      disabled={isSubmitting}
+                      className={`flex items-center justify-between px-4 py-3 rounded-2xl border text-left transition-all ${selectedModel === m.id ? "border-[#3b82f6] bg-[#3b82f6]/10" : "border-white/[0.08] bg-white/[0.03] hover:border-white/20"}`}
+                    >
+                      <div>
+                        <span className="block text-sm font-semibold">{m.name}</span>
+                        <span className="block text-[11px] text-white/40 mt-0.5">{m.provider}</span>
+                      </div>
+                      <span className="text-[11px] font-mono text-white/50 shrink-0 ml-3">
+                        {paymentMethod === "umbra" ? m.priceUsdc : m.priceSol}
+                      </span>
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
 
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-[#a0a0a0] ml-1">Context / Prompt</label>
-                <textarea 
+                <textarea
                   className="w-full bg-white/[0.05] border border-white/[0.08] rounded-2xl px-4 py-4 text-sm min-h-[140px] focus:outline-none focus:border-[#3b82f6] transition-all disabled:opacity-50 placeholder:text-white/20"
                   placeholder="Input your challenge for the model..."
                   value={prompt}
@@ -235,22 +331,22 @@ export default function Home() {
 
               {paymentQuote && (
                 <div className="bg-[#3b82f6]/10 border border-[#3b82f6]/20 rounded-2xl p-5 space-y-3 animate-in zoom-in-95 duration-300">
-                   <div className="flex justify-between text-sm">
-                      <span className="text-[#a0a0a0]">Inference Fee</span>
-                      <span className="font-semibold text-[#3b82f6]">{lamportsToSol(paymentQuote.amountLamports)} SOL</span>
-                   </div>
-                   <div className="flex justify-between text-sm">
-                      <span className="text-[#a0a0a0]">Network Service Fee</span>
-                      <span className="text-white/40">~0.000005 SOL</span>
-                   </div>
-                   <div className="pt-2 border-t border-white/5 text-[10px] text-white/30 truncate">
-                      Memo: {paymentQuote.memo}
-                   </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[#a0a0a0]">Inference Fee</span>
+                    <span className="font-semibold text-[#3b82f6]">{formatQuoteAmount(paymentQuote)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[#a0a0a0]">Payment Rail</span>
+                    <span className="text-white/70">{paymentQuote.paymentMethod === "umbra" ? "Umbra private mixer" : "Native Solana transfer"}</span>
+                  </div>
+                  <div className="pt-2 border-t border-white/5 text-[10px] text-white/30 break-all">
+                    Quote ID: {paymentQuote.quoteId || "standard-flow"}
+                  </div>
                 </div>
               )}
 
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 className="w-full bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-white/5 disabled:text-white/20 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl transition-all active:scale-[0.98] flex items-center justify-center gap-3 overflow-hidden"
                 disabled={isSubmitting || !backendOnline || !prompt.trim()}
               >
@@ -260,7 +356,13 @@ export default function Home() {
                     <span className="text-sm tracking-tight">{status}</span>
                   </>
                 ) : (
-                  <span className="tracking-tight">{wallet ? "Dispatch Request" : "Connect Wallet to Dispatch"}</span>
+                  <span className="tracking-tight">
+                    {wallet
+                      ? paymentMethod === "umbra"
+                        ? "Dispatch Private Request"
+                        : "Dispatch Request"
+                      : "Connect Wallet to Dispatch"}
+                  </span>
                 )}
               </button>
             </form>
@@ -276,36 +378,52 @@ export default function Home() {
           {result && (
             <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/[0.08] rounded-[32px] p-6 sm:p-8 animate-in slide-in-from-bottom-8 duration-700 shadow-2xl relative overflow-hidden">
               <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
-                <svg width="100" height="100" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="1"/></svg>
+                <svg width="100" height="100" viewBox="0 0 100 100" fill="none">
+                  <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="1" />
+                </svg>
               </div>
 
               <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
                 <h2 className="text-lg font-semibold tracking-tight">Intelligence Output</h2>
                 <div className="px-3 py-1 bg-[#10b981]/10 text-[#10b981] rounded-full text-[10px] font-bold uppercase tracking-wider border border-[#10b981]/20">
-                  Verified Settlement
+                  {result.payment?.method === "umbra" ? "Verified Private Payment" : "Verified Settlement"}
                 </div>
               </div>
-              
+
               <div className="text-[#ededed] leading-relaxed text-sm sm:text-base whitespace-pre-wrap selection:bg-[#3b82f6]/40">
                 {result.ai}
               </div>
 
               <div className="mt-10 pt-8 border-t border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div>
-                  <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">On-Chain Asset Proof</span>
+                  <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Payment Proof</span>
                   <span className="text-[11px] font-mono break-all text-white/50 block leading-tight">{result.paidTxSignature}</span>
                 </div>
                 <div>
                   <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Runtime Model</span>
                   <span className="text-sm font-medium text-white/80">{selectedModel}</span>
                 </div>
+                {result.payment?.method === "umbra" && (
+                  <div>
+                    <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Private Payment Amount</span>
+                    <span className="text-sm font-medium text-white/80">
+                      {result.payment.amountAtomic ? (result.payment.amountAtomic / 1_000_000).toFixed(6) : "0.000000"} USDC
+                    </span>
+                  </div>
+                )}
+                {result.viewingKey && (
+                  <div>
+                    <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Viewing Key</span>
+                    <span className="text-[11px] font-mono break-all text-white/50 block leading-tight">{result.viewingKey}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
         </section>
 
         <footer className="text-center pb-8 opacity-20 hover:opacity-100 transition-opacity duration-1000">
-          <p className="text-[10px] tracking-widest uppercase">Protocol x402 &bull; Agentic AI Proof of Stake</p>
+          <p className="text-[10px] tracking-widest uppercase">Protocol x402 • Agentic AI Proof of Stake</p>
         </footer>
       </div>
     </main>

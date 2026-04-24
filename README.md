@@ -1,231 +1,195 @@
 # AgentX402
 
-A **pay-per-prompt AI gateway** built on the x402 payment protocol. Users pay SOL on Solana per request, and the backend routes prompts to multiple AI providers (Claude, GPT-4o, Gemini, Llama). Payments are settled privately through MagicBlock's TEE layer.
+AgentX402 is a Solana x402-style pay-per-request AI app in a Turborepo monorepo.
 
----
+The current implementation has:
 
-## Before You Start — API Keys You Need
+- A Next.js frontend in `apps/web` that connects to Phantom, requests a payment quote, signs a SOL transfer locally, and re-submits the signed transaction to the backend.
+- An Express backend in `apps/backend` that returns a `402 Payment Required` quote, verifies the signed transaction, submits it to Solana devnet if needed, and then calls the selected AI model.
+- A simple in-memory model registry that maps each supported model to an owner wallet, API key, and per-request lamport price.
+- An experimental Umbra private-payment path that creates receiver-claimable UTXOs in the browser and verifies them server-side by scanning for matching claimable UTXOs addressed to the platform wallet.
 
-Copy `apps/backend/.env.example` to `apps/backend/.env` and fill in the keys below.
+## What Is Actually Implemented
 
-```sh
-cp apps/backend/.env.example apps/backend/.env
+This repo is not currently a generic AI marketplace or multi-route gateway. The working flow is narrower and concrete:
+
+1. The frontend sends `POST /premium` with `model` and `prompt`.
+2. The backend looks up that model in its local in-memory store.
+3. If no signed payment is attached, the backend responds with HTTP `402` and a payment quote.
+4. The frontend builds a native SOL transfer transaction in the browser and signs it with Phantom.
+5. The frontend sends the signed transaction back in the `x402-signed-tx` header.
+6. The backend verifies the transfer instructions, submits the transaction when necessary, confirms it on devnet, checks receiver balance change, and only then calls the AI provider.
+7. The backend returns the AI text plus the paid transaction signature.
+
+There is also an experimental private flow:
+
+1. The frontend sends `POST /premium` with `paymentMethod: "umbra"`.
+2. The backend returns a private quote with a unique `quoteId`, Umbra mint metadata, and a unique atomic amount.
+3. The browser creates an Umbra receiver-claimable UTXO addressed to the platform wallet.
+4. The frontend re-submits the request with `x402-quote-id`.
+5. The backend scans for a matching unconsumed claimable UTXO and only then releases the AI response.
+
+## Supported Models
+
+The current UI and backend support these model ids:
+
+| Model id | Provider | Backend adapter |
+| --- | --- | --- |
+| `gpt-3.5-turbo` | OpenAI | `@ai-sdk/openai` |
+| `groq` | Groq | `@ai-sdk/groq` using `llama-3.3-70b-versatile` |
+| `gemini-2` | Google | `@ai-sdk/google` using `gemini-2.0-flash` |
+| `gemini-2.5-pro` | Google | `@ai-sdk/google` using `gemini-2.5-pro` |
+
+## Repo Layout
+
+```text
+apps/
+  backend/   Express + TypeScript API
+  web/       Next.js frontend for wallet + payment + prompt flow
+  admin/     default scaffold, not part of the implemented flow
+  docs/      default scaffold, not part of the implemented flow
+packages/
+  ui/
+  eslint-config/
+  typescript-config/
 ```
 
----
+## Backend API
 
-## 1. Google Generative AI (Gemini) — FREE tier available
+### `GET /health`
 
-**Variable:** `GOOGLE_GENERATIVE_AI_API_KEY`
+Returns:
 
-**What it does:** Powers Gemini 2.5 Pro, Gemini 2.5 Flash, and Gemini 2.0 Flash in this project.
-
-**Good news: Google gives free API keys.** Gemini has a generous free tier (requests per minute limit, but no billing required to start).
-
-**How to get it:**
-1. Go to **https://aistudio.google.com**
-2. Sign in with your Google account
-3. Click **"Get API key"** in the left sidebar
-4. Click **"Create API key"** → choose a project (or create a new one)
-5. Copy the key — it starts with `AIza...`
-
-Paste it as:
-```
-GOOGLE_GENERATIVE_AI_API_KEY=AIzaxxxxxxxxxxxxxxxxxxxxxxxxx
+```json
+{ "ok": true }
 ```
 
-> The free tier is enough to test the project. If you hit rate limits, go to Google Cloud Console and enable billing to get higher limits.
+### `POST /premium`
 
----
+Request body:
 
-## 2. OpenAI (GPT-4o) — NOT free, requires payment
-
-**Variable:** `OPENAI_API_KEY`
-
-**What it does:** Powers GPT-4o and GPT-4o Mini models.
-
-**OpenAI does NOT have a free tier anymore.** You must add a payment method and purchase credits. The minimum top-up is $5. New accounts sometimes (not always) get a small free credit — do not rely on it.
-
-**How to get it:**
-1. Go to **https://platform.openai.com**
-2. Sign up or log in
-3. Go to **Settings → Billing** and add a payment method
-4. Purchase at least **$5** of credits
-5. Go to **API Keys** (https://platform.openai.com/api-keys)
-6. Click **"Create new secret key"**
-7. Copy the key immediately — it starts with `sk-...` and is shown only once
-
-Paste it as:
-```
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```json
+{
+  "model": "gemini-2",
+  "prompt": "Explain Solana accounts simply"
+}
 ```
 
-> If you want to skip OpenAI for now, just leave the key blank. The backend will still work with other providers — the `LOAD_BALANCING_STRATEGY=cheapest` setting will automatically route to cheaper models.
+First response when no payment is attached:
 
----
-
-## 3. Anthropic (Claude) — your $20 plan does NOT include API access
-
-**Variable:** `ANTHROPIC_API_KEY`
-
-**Important:** The **Claude.ai Pro ($20/month) subscription** is for the **website chat** only. It does NOT give you API access. The API is a separate product with separate billing.
-
-**You need to create an API account separately:**
-1. Go to **https://console.anthropic.com**
-2. Sign up (can use the same email as your Claude.ai account)
-3. Go to **Billing** and add a payment method
-4. Purchase API credits — minimum is usually **$5**
-5. Go to **API Keys** → **Create Key**
-6. Copy the key — it starts with `sk-ant-...`
-
-Paste it as:
-```
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```json
+{
+  "message": "Payment required",
+  "paymentRequest": {
+    "receiver": "wallet-address",
+    "amountLamports": 1000000,
+    "memo": "payment for model:gemini-2"
+  }
+}
 ```
 
-> Claude Sonnet 4.6 and Claude Opus 4 are the models used here. Sonnet is much cheaper per token. If you want to minimize API costs during testing, you can comment out the Opus model in `apps/backend/src/aiProviders.ts`.
+Final paid request uses header:
 
----
-
-## 4. Together AI (Llama 3.3 70B) — FREE $1 credit on signup
-
-**Variable:** `TOGETHER_API_KEY`
-
-**What it does:** Routes prompts to open-source models like Meta's Llama 3.3 70B — the cheapest option in this project at $0.00088 per 1K tokens.
-
-**Together AI gives free credits on signup.** New accounts get $1 free credit, which is enough for thousands of test requests with Llama.
-
-**How to get it:**
-1. Go to **https://api.together.ai**
-2. Sign up with email or GitHub
-3. Go to **Settings → API Keys**
-4. Click **"Create API Key"**
-5. Copy the key
-
-Paste it as:
-```
-TOGETHER_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```text
+x402-signed-tx: <base64 serialized signed transaction>
 ```
 
-> Together AI is great for development and testing because it is the cheapest provider in this project and gives free credits. Start here if you want to test without spending money.
+Success response:
 
----
-
-## 5. MagicBlock — OPTIONAL, for private on-chain payments
-
-**Variable:** `PLATFORM_WALLET_PRIVATE_KEY`
-
-### What is MagicBlock?
-
-MagicBlock is a **privacy layer for Solana payments**. It uses a TEE (Trusted Execution Environment — a secure chip-level enclave) to process USDC transfers without creating a visible on-chain link between sender and recipient.
-
-### Why is it used here?
-
-In AgentX402, when a user pays SOL for an AI request, the backend splits that payment:
-- **80%** goes to the API key holder (the person who registered their key)
-- **20%** stays with the platform wallet (you, the operator)
-
-Without MagicBlock, these splits happen as normal on-chain transfers — anyone can see the payment graph on a Solana explorer. With MagicBlock's private USDC transfers, the redistribution is settled privately.
-
-### No API key needed
-
-**MagicBlock's Payments API requires no API key.** Authentication is handled entirely by wallet signatures on the transactions it returns. See the official reference: https://payments.magicblock.app/reference
-
-### How it works
-
-The backend calls MagicBlock's `/v1/spl/transfer` endpoint, which returns an **unsigned transaction**. The backend then signs that transaction with the platform wallet's private key and submits it to Solana (or MagicBlock's ephemeral RPC).
-
-This means to enable real on-chain settlement you need:
-1. The platform wallet's private key (base58-encoded) in `PLATFORM_WALLET_PRIVATE_KEY`
-2. USDC in that wallet for the transfers
-
-### Is it required?
-
-**No. MagicBlock is optional.** If you do not set `PLATFORM_WALLET_PRIVATE_KEY`, the backend automatically falls back to **"simulated settlement"** — payment splits are logged but not executed on-chain. This is fine for development and testing.
-
-```
-# Leave blank for simulated mode during development:
-PLATFORM_WALLET_PRIVATE_KEY=
+```json
+{
+  "paidTxSignature": "solana-signature",
+  "ai": "model output text"
+}
 ```
 
-### How to export your platform wallet's private key
+## Required Backend Environment Variables
 
-Your platform wallet is the Solana wallet you set in `PLATFORM_WALLET`. To get its private key:
+Create `apps/backend/.env`.
 
-- **Phantom wallet:** Settings → Security & Privacy → Export Private Key → enter password → copy the base58 key
-- **Solana CLI:** `solana-keygen show --outfile /dev/stdout` or check your keypair JSON file
-
-> **WARNING:** Keep `PLATFORM_WALLET_PRIVATE_KEY` secret. Never commit it to git. It is already in `.gitignore` via `.env`.
-
-> **Recommendation:** Leave `PLATFORM_WALLET_PRIVATE_KEY` empty while building and testing. The simulated settlement mode logs all the payment splits correctly — you just will not see them on-chain. Add the real key when you are ready to go to production.
-
----
-
-## Quick Setup Summary
-
-| Key | Free? | Priority |
-|-----|-------|----------|
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Yes, free tier at aistudio.google.com | Get this first |
-| `TOGETHER_API_KEY` | $1 free credit at api.together.ai | Get this second |
-| `OPENAI_API_KEY` | No, minimum $5 at platform.openai.com | Optional |
-| `ANTHROPIC_API_KEY` | No, separate from Claude.ai Pro — console.anthropic.com | Optional |
-| `PLATFORM_WALLET_PRIVATE_KEY` | No key needed — export from your own wallet | Leave blank for dev |
-
-**Minimum to get started:** You only need ONE AI provider key. Start with Google (free) or Together AI ($1 credit). The backend will route all requests to whichever providers have valid keys.
-
----
-
-## Other Environment Variables
+Minimum useful variables:
 
 ```env
-# Your Solana wallet address — this is where platform fees go
-PLATFORM_WALLET=YourSolanaWalletAddressHere
+SOLANA_RPC_URL=https://api.devnet.solana.com
+DEFAULT_OWNER=YourSolanaWalletAddress
 
-# How much SOL users must pay per request (in lamports)
-# 10,000,000 lamports = 0.01 SOL
-X402_PAYMENT_AMOUNT_LAMPORTS=10000000
-
-# "cheapest" routes to lowest cost model, "round-robin" cycles through all
-LOAD_BALANCING_STRATEGY=cheapest
-
-# Use devnet for testing (free SOL from faucet), mainnet for production
-SOLANA_NETWORK=devnet
-SOLANA_RPC=https://api.devnet.solana.com
+OPENAI_API_KEY=
+groq_API_KEY=
+GOOGLE_API_KEY=
+GOOGLE_API_KEY2=
+UMBRA_PLATFORM_PRIVATE_KEY=
+UMBRA_NETWORK=devnet
+UMBRA_MINT_ADDRESS=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+UMBRA_INDEXER_API_ENDPOINT=https://utxo-indexer.api.umbraprivacy.com
+UMBRA_TREE_INDEX=0
 ```
 
-To get devnet SOL for testing: https://faucet.solana.com — paste your wallet address and request free test SOL.
+Notes:
 
----
+- `GOOGLE_API_KEY` is used for `gemini-2.5-pro`.
+- `GOOGLE_API_KEY2` is used for `gemini-2`.
+- `groq_API_KEY` is lowercase in the current backend code.
+- If a model is selected but its mapped API key is missing, the request will fail at runtime.
+- `UMBRA_PLATFORM_PRIVATE_KEY` is only required for the private Umbra path. It should be the platform wallet secret in base58 or JSON-array form.
 
-## Running the Backend
+## Run The Project
+
+Install dependencies:
 
 ```sh
-# Install dependencies
 pnpm install
-
-# Start the backend in development mode
-pnpm --filter backend dev
-
-# Or from the backend directory:
-cd apps/backend
-pnpm dev
 ```
 
-The server starts on `http://localhost:3000`. Check it with:
+Run the backend:
+
 ```sh
-curl http://localhost:3000/health
+pnpm --filter backend dev
 ```
 
----
+Run the frontend:
 
-## API Endpoints
+```sh
+pnpm --filter web dev
+```
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Server status and config |
-| POST | `/api/chat` | Pay-per-prompt — requires `x-payment` header |
-| GET | `/api/models` | List all available AI models |
-| GET | `/api/providers` | List all AI providers and status |
-| GET | `/api/analytics` | Request and cost analytics |
-| POST | `/api/keys/register` | Register an API key to earn from requests |
-| GET | `/api/keys/:keyHash/earnings` | Check earnings for a key |
+Default local ports:
+
+- Backend: `http://localhost:3000`
+- Frontend: `http://localhost:3002`
+
+Frontend backend base URL:
+
+```env
+NEXT_PUBLIC_BACKEND_URL=http://localhost:3000
+```
+
+## Frontend Flow
+
+The web app in `apps/web` currently provides:
+
+- Phantom wallet connect
+- Backend health check
+- Model picker
+- Prompt input
+- Payment quote display in lamports/SOL
+- Local transaction signing
+- Final AI response view with paid transaction signature
+
+The frontend is hardcoded to Solana devnet via `clusterApiUrl("devnet")`.
+
+## Important Current Limitations
+
+- Model pricing and ownership are not fetched from a database; they come from an in-memory object in `apps/backend/src/db/prisma.ts`.
+- The Prisma schema exists, but the live code path does not currently query PostgreSQL.
+- The backend only exposes `/premium` and `/health`.
+- There is no provider auto-fallback, analytics API, earnings API, key registration API, or MagicBlock settlement in the current request flow.
+- The Umbra path currently verifies by scanning for a matching claimable UTXO. It is suitable for an MVP/demo flow, but it is not yet hardened for high-concurrency production settlement.
+- The frontend currently targets Phantom-compatible wallet injection and assumes browser signing.
+
+## Tech Stack
+
+- Monorepo: Turborepo + pnpm
+- Frontend: Next.js 16, React 19, Tailwind CSS
+- Backend: Express 5, TypeScript
+- Solana: `@solana/web3.js`
+- AI SDKs: Vercel AI SDK with OpenAI, Groq, and Google adapters

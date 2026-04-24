@@ -13,6 +13,11 @@
   "dependencies": {
     "@repo/ui": "workspace:*",
     "@solana/web3.js": "^1.98.0",
+    "@umbra-privacy/sdk": "^4.0.0",
+    "@umbra-privacy/web-zk-prover": "^2.0.1",
+    "@wallet-standard/app": "^1.1.0",
+    "@wallet-standard/base": "^1.1.0",
+    "@wallet-standard/features": "^1.1.0",
     "next": "16.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

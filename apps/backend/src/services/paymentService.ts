@@ -4,6 +4,15 @@ export function createPaymentRequest(opts:{
     amountLamports:number;
     memo?:string,
     expiresInSec?:number;
+    paymentMethod?: "standard" | "umbra";
+    currency?: "SOL" | "USDC";
+    quoteId?: string;
+    umbra?: {
+        mint: string;
+        network: string;
+        indexerApiEndpoint: string;
+        treeIndex: number;
+    };
 
 }){
 
@@ -11,7 +20,12 @@ export function createPaymentRequest(opts:{
     return {
         receiver: opts.receiver,
         amountLamports: opts.amountLamports,
-        memo: opts.memo || ""
+        memo: opts.memo || "",
+        expiresInSec: opts.expiresInSec || 300,
+        paymentMethod: opts.paymentMethod || "standard",
+        currency: opts.currency || "SOL",
+        quoteId: opts.quoteId || null,
+        umbra: opts.umbra || null,
 
     }
 
