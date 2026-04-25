@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import bs58 from "bs58";
+import { Keypair } from "@solana/web3.js";
 import { ENV } from "../config/env";
 
 type UmbraQuote = {
@@ -60,13 +61,34 @@ function parseSecretKey(secret: string): Uint8Array {
   return bs58.decode(trimmed);
 }
 
+function require64ByteKeypair(bytes: Uint8Array): Uint8Array {
+  if (bytes.length !== 64) {
+    throw new Error(
+      `UMBRA_PLATFORM_PRIVATE_KEY decoded to ${bytes.length} bytes — must be exactly 64 bytes. ` +
+      `You likely set your wallet ADDRESS (32 bytes) instead of your private key. ` +
+      `Export the full keypair: run 'solana-keygen new --outfile platform.json' and paste the JSON array, ` +
+      `or export from Phantom (Settings → Security & Privacy → Export Private Key).`
+    );
+  }
+  return bytes;
+}
+
+export function getUmbraPlatformAddress() {
+  if (!ENV.UMBRA_PLATFORM_PRIVATE_KEY) {
+    return null;
+  }
+
+  return Keypair.fromSecretKey(
+    require64ByteKeypair(parseSecretKey(ENV.UMBRA_PLATFORM_PRIVATE_KEY))
+  ).publicKey.toBase58();
+}
+
 async function getUmbraRuntime() {
   if (!umbraRuntimePromise) {
     umbraRuntimePromise = (async () => {
       const sdk = await import("@umbra-privacy/sdk");
-      const signer = await sdk.createSignerFromPrivateKeyBytes(
-        parseSecretKey(ENV.UMBRA_PLATFORM_PRIVATE_KEY)
-      );
+      const keypairBytes = require64ByteKeypair(parseSecretKey(ENV.UMBRA_PLATFORM_PRIVATE_KEY));
+      const signer = await sdk.createSignerFromPrivateKeyBytes(keypairBytes);
 
       const client = await sdk.getUmbraClient({
         signer,
@@ -78,7 +100,7 @@ async function getUmbraRuntime() {
       });
 
       const register = sdk.getUserRegistrationFunction({ client });
-      await register({ confidential: true, anonymous: false });
+      await register({ confidential: true, anonymous: true });
 
       return {
         scanClaimable: sdk.getClaimableUtxoScannerFunction({ client }),
@@ -87,6 +109,10 @@ async function getUmbraRuntime() {
   }
 
   return umbraRuntimePromise;
+}
+
+export async function ensureUmbraPlatformRegistration() {
+  await getUmbraRuntime();
 }
 
 export function createUmbraQuote(params: {

@@ -85,7 +85,15 @@ export async function verifyAndSendSignedTransaction(params: {
       // Only wait for confirmation if we didn't already know it was confirmed
       if (!confirmed) {
         console.log("Waiting for confirmation...");
-        const result = await connection.confirmTransaction(signature, "confirmed");
+        const latestBlockhash = await connection.getLatestBlockhash("confirmed");
+        const result = await connection.confirmTransaction(
+          {
+            signature,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+          },
+          "confirmed"
+        );
         if (result.value.err) {
           return {
             success: false,

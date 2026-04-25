@@ -57,6 +57,19 @@ type AIResponse = {
   viewingKey?: string;
 };
 
+type ErrorResponse = {
+  error?: string;
+  details?: string;
+};
+
+function getErrorDetails(data: AIResponse | ErrorResponse | null) {
+  if (!data || typeof data !== "object" || !("details" in data)) {
+    return null;
+  }
+
+  return typeof data.details === "string" ? data.details : null;
+}
+
 type PhantomProvider = {
   isPhantom?: boolean;
   publicKey?: PublicKey;
@@ -150,20 +163,45 @@ export default function Home() {
       rpcUrl: RPC_URL,
     });
 
-    const finalRes = await fetch(`${BACKEND_URL}/premium`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x402-quote-id": privatePayment.quoteId,
-      },
-      body: JSON.stringify({ model: selectedModel, prompt, paymentMethod: "umbra" }),
-    });
+    let lastResponse: Response | null = null;
+    let lastData: AIResponse | ErrorResponse | null = null;
 
-    const finalData = await finalRes.json();
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const finalRes = await fetch(`${BACKEND_URL}/premium`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x402-quote-id": privatePayment.quoteId,
+        },
+        body: JSON.stringify({ model: selectedModel, prompt, paymentMethod: "umbra" }),
+      });
+
+      const finalData = (await finalRes.json()) as AIResponse | ErrorResponse;
+      lastResponse = finalRes;
+      lastData = finalData;
+
+      if (
+        finalRes.ok ||
+        getErrorDetails(finalData) !== "matching_umbra_utxo_not_found_yet" ||
+        attempt === 5
+      ) {
+        return {
+          response: finalRes,
+          data: {
+            ...finalData,
+            viewingKey: privatePayment.viewingKey,
+          } as AIResponse,
+        };
+      }
+
+      setStatus(`Waiting for private payment indexing... (${attempt + 1}/6)`);
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+    }
+
     return {
-      response: finalRes,
+      response: lastResponse as Response,
       data: {
-        ...finalData,
+        ...(lastData || {}),
         viewingKey: privatePayment.viewingKey,
       } as AIResponse,
     };
@@ -202,7 +240,11 @@ export default function Home() {
         setStatus("Creating private Umbra payment...");
         const { response, data } = await handleUmbraPayment(paymentRequest);
         if (!response.ok) {
-          const detailMsg = data?.payment ? "" : data ? `: ${JSON.stringify(data)}` : "";
+          const detailMsg = getErrorDetails(data)
+            ? `: ${getErrorDetails(data)}`
+            : data
+              ? `: ${JSON.stringify(data)}`
+              : "";
           throw new Error(`Private payment verification or AI processing failed${detailMsg}`);
         }
 

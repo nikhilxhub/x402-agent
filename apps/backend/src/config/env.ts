@@ -12,7 +12,7 @@ export const ENV = {
         process.env.UMBRA_RPC_SUBSCRIPTIONS_URL || "",
     UMBRA_PLATFORM_PRIVATE_KEY: process.env.UMBRA_PLATFORM_PRIVATE_KEY || "",
     UMBRA_MINT_ADDRESS:
-        process.env.UMBRA_MINT_ADDRESS || "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        process.env.UMBRA_MINT_ADDRESS || "4zMMC9srt5Ri5X14YQuhg8UTZMMzDdKhmkZMECCzk57",
     UMBRA_TREE_INDEX: Number(process.env.UMBRA_TREE_INDEX || "0"),
 
 }

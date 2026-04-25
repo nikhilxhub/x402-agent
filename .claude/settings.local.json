@@ -8,7 +8,11 @@
       "Bash(npx tsc:*)",
       "Bash(grep \"\\\\.d\\\\.ts$\")",
       "Bash(pnpm exec *)",
-      "WebFetch(domain:sdk.umbraprivacy.com)"
+      "WebFetch(domain:sdk.umbraprivacy.com)",
+      "Bash(grep -on \"\\\\\"[A-Za-z0-9]\\\\{32,44\\\\}\\\\\"\" \"D:/web3projects/test/x402-umbra/node_modules/.pnpm/@umbra-privacy+sdk@4.0.0_bufferutil@4.1.0_typescript@5.9.2_utf-8-validate@6.0.6/node_modules/@umbra-privacy/sdk/dist/index.cjs\")",
+      "Bash(grep -i \"devnet\\\\|address\\\\|\\\\\"[A-Za-z0-9]\\\\{32,44\\\\}\\\\\"\")",
+      "Bash(awk -F: '{if\\($1 < 8127\\) last=$0} END{print last}')",
+      "Bash(awk -F: '$1 < 5772')"
     ]
   }
 }

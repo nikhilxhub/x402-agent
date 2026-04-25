@@ -4,7 +4,12 @@ import { findApiKeyToModel2 } from "../db/prisma";
 import { createPaymentRequest } from "../services/paymentService";
 import { verifyAndSendSignedTransaction } from "../services/verifyAndSendSignedTransaction";
 import { callModel_Api } from "../services/aiService";
-import { createUmbraQuote, verifyUmbraPayment } from "../services/umbraService";
+import {
+  createUmbraQuote,
+  ensureUmbraPlatformRegistration,
+  getUmbraPlatformAddress,
+  verifyUmbraPayment,
+} from "../services/umbraService";
 import { ENV } from "../config/env";
 
 export const premiumRouter: Router = Router();
@@ -25,18 +30,28 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
     const api_key = apiKeyEntry.api_key;
 
     if (paymentMethod === "umbra") {
+      const umbraReceiver = getUmbraPlatformAddress();
+      if (!umbraReceiver) {
+        return res.status(400).json({
+          error: "umbra_unavailable",
+          details: "UMBRA_PLATFORM_PRIVATE_KEY is not configured on the backend",
+        });
+      }
+
       const quoteId = (req.headers["x402-quote-id"] as string) || null;
 
       if (!quoteId) {
+        await ensureUmbraPlatformRegistration();
+
         const quote = createUmbraQuote({
-          receiver,
+          receiver: umbraReceiver,
           baseAmountAtomic: rateUsdc,
         });
 
         return res.status(402).json({
           message: "Private payment required",
           paymentRequest: createPaymentRequest({
-            receiver,
+            receiver: umbraReceiver,
             amountLamports: quote.amountAtomic,
             memo: `private payment for model:${aiModel}`,
             expiresInSec: 300,
@@ -55,7 +70,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
 
       const umbraVerification = await verifyUmbraPayment({
         quoteId,
-        expectedReceiver: receiver,
+        expectedReceiver: umbraReceiver,
       });
 
       if (!umbraVerification.success) {
