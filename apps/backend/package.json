@@ -16,6 +16,7 @@
     "@repo/typescript-config": "workspace:*",
     "@solana/web3.js": "^1.98.4",
     "@umbra-privacy/sdk": "^4.0.0",
+    "@umbra-privacy/web-zk-prover": "^2.0.1",
     "ai": "^5.0.87",
     "axios": "^1.12.2",
     "bs58": "^6.0.0",

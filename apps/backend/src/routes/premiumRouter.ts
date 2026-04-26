@@ -45,7 +45,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
 
         const quote = createUmbraQuote({
           receiver: umbraReceiver,
-          baseAmountAtomic: rateUsdc,
+          baseAmountAtomic: rateLamports, // wSOL uses 9 decimals = same as SOL lamports
         });
 
         return res.status(402).json({
@@ -56,7 +56,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
             memo: `private payment for model:${aiModel}`,
             expiresInSec: 300,
             paymentMethod: "umbra",
-            currency: "USDC",
+            currency: "SOL",
             quoteId: quote.quoteId,
             umbra: {
               mint: ENV.UMBRA_MINT_ADDRESS,
@@ -93,7 +93,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
           method: "umbra",
           quoteId: umbraVerification.quoteId,
           amountAtomic: umbraVerification.amountAtomic,
-          currency: "USDC",
+          currency: "SOL",
           destinationAddress: umbraVerification.destinationAddress,
           leafIndex: umbraVerification.leafIndex,
           unlockerType: umbraVerification.unlockerType,

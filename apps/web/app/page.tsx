@@ -332,7 +332,7 @@ export default function Home() {
                     disabled={isSubmitting}
                   >
                     <span className="block text-sm font-semibold">Private</span>
-                    <span className="block text-[11px] text-white/40 mt-1">Umbra receiver-claimable UTXO with viewing key disclosure.</span>
+                    <span className="block text-[11px] text-white/40 mt-1">Umbra private UTXO — shielded SOL via wSOL pool.</span>
                   </button>
                 </div>
               </div>
@@ -353,7 +353,7 @@ export default function Home() {
                         <span className="block text-[11px] text-white/40 mt-0.5">{m.provider}</span>
                       </div>
                       <span className="text-[11px] font-mono text-white/50 shrink-0 ml-3">
-                        {paymentMethod === "umbra" ? m.priceUsdc : m.priceSol}
+                        {m.priceSol}
                       </span>
                     </button>
                   ))}

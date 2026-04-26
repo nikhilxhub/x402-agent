@@ -87,6 +87,7 @@ async function getUmbraRuntime() {
   if (!umbraRuntimePromise) {
     umbraRuntimePromise = (async () => {
       const sdk = await import("@umbra-privacy/sdk");
+      const zkProverModule = await import("@umbra-privacy/web-zk-prover");
       const keypairBytes = require64ByteKeypair(parseSecretKey(ENV.UMBRA_PLATFORM_PRIVATE_KEY));
       const signer = await sdk.createSignerFromPrivateKeyBytes(keypairBytes);
 
@@ -99,8 +100,15 @@ async function getUmbraRuntime() {
         deferMasterSeedSignature: true,
       });
 
-      const register = sdk.getUserRegistrationFunction({ client });
+      console.log("Umbra: Initializing runtime and registering platform...");
+      // zkProver is required when registering with anonymous: true
+      const registrationProver = zkProverModule.getUserRegistrationProver();
+      const register = sdk.getUserRegistrationFunction(
+        { client },
+        { zkProver: registrationProver }
+      );
       await register({ confidential: true, anonymous: true });
+      console.log("Umbra: Platform registered successfully (anonymous: true)");
 
       return {
         scanClaimable: sdk.getClaimableUtxoScannerFunction({ client }),
@@ -187,6 +195,7 @@ export async function verifyUmbraPayment(params: {
     const leafKey = candidate.insertionIndex.toString();
     return (
       candidate.destinationAddress === params.expectedReceiver &&
+      (candidate as any).mint === ENV.UMBRA_MINT_ADDRESS &&
       Number(candidate.amount) === quote.amountAtomic &&
       !consumedLeafIndices.has(leafKey)
     );
