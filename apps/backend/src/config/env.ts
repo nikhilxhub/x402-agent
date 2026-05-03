@@ -3,7 +3,6 @@ dotenv.config();
 
 
 export const ENV = {
-
     SOLANA_RPC_URL: process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
     UMBRA_NETWORK: process.env.UMBRA_NETWORK || "devnet",
     UMBRA_INDEXER_API_ENDPOINT:
@@ -12,7 +11,8 @@ export const ENV = {
         process.env.UMBRA_RPC_SUBSCRIPTIONS_URL || "",
     UMBRA_PLATFORM_PRIVATE_KEY: process.env.UMBRA_PLATFORM_PRIVATE_KEY || "",
     UMBRA_MINT_ADDRESS:
-        process.env.UMBRA_MINT_ADDRESS || "4zMMC9srt5Ri5X14YQuhg8UTZMMzDdKhmkZMECCzk57",
+        process.env.UMBRA_MINT_ADDRESS || "4oG4sjmopf5MzvTHLE8rpVJ2uyczxfsw2K84SUTpNDx7",
+    UMBRA_MINT_SYMBOL: process.env.UMBRA_MINT_SYMBOL || "dUSDC",
+    UMBRA_MINT_DECIMALS: Number(process.env.UMBRA_MINT_DECIMALS || "6"),
     UMBRA_TREE_INDEX: Number(process.env.UMBRA_TREE_INDEX || "0"),
-
-}
+};

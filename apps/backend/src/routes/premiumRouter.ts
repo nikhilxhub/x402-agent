@@ -17,6 +17,12 @@ export const premiumRouter: Router = Router();
 premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: express.Response) => {
   try {
     const { model, prompt, paymentMethod = "standard" } = req.body;
+    console.log("[PremiumRoute] request", {
+      paymentMethod,
+      model,
+      hasQuoteId: Boolean(req.headers["x402-quote-id"]),
+      hasSignedTx: Boolean(req.headers["x402-signed-tx"]),
+    });
 
     const apiKeyEntry = await findApiKeyToModel2(model);
     if (!apiKeyEntry) {
@@ -41,11 +47,17 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
       const quoteId = (req.headers["x402-quote-id"] as string) || null;
 
       if (!quoteId) {
+        console.log("[PremiumRoute] umbra quote requested", {
+          model: aiModel,
+          amountAtomic: rateUsdc,
+          mint: ENV.UMBRA_MINT_ADDRESS,
+          symbol: ENV.UMBRA_MINT_SYMBOL,
+        });
         await ensureUmbraPlatformRegistration();
 
         const quote = createUmbraQuote({
           receiver: umbraReceiver,
-          baseAmountAtomic: rateLamports, // wSOL uses 9 decimals = same as SOL lamports
+          baseAmountAtomic: rateUsdc,
         });
 
         return res.status(402).json({
@@ -56,10 +68,12 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
             memo: `private payment for model:${aiModel}`,
             expiresInSec: 300,
             paymentMethod: "umbra",
-            currency: "SOL",
+            currency: ENV.UMBRA_MINT_SYMBOL as "dUSDC",
             quoteId: quote.quoteId,
             umbra: {
               mint: ENV.UMBRA_MINT_ADDRESS,
+              symbol: ENV.UMBRA_MINT_SYMBOL,
+              decimals: ENV.UMBRA_MINT_DECIMALS,
               network: ENV.UMBRA_NETWORK,
               indexerApiEndpoint: ENV.UMBRA_INDEXER_API_ENDPOINT,
               treeIndex: ENV.UMBRA_TREE_INDEX,
@@ -74,11 +88,21 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
       });
 
       if (!umbraVerification.success) {
+        console.warn("[PremiumRoute] umbra verification failed", {
+          quoteId,
+          reason: umbraVerification.reason,
+        });
         return res.status(400).json({
           error: "umbra payment verification failed",
           details: umbraVerification.reason,
         });
       }
+
+      console.log("[PremiumRoute] umbra verification succeeded", {
+        quoteId,
+        leafIndex: umbraVerification.leafIndex,
+        amountAtomic: umbraVerification.amountAtomic,
+      });
 
       const aiResponse = await callModel_Api({
         model: aiModel,
@@ -93,7 +117,9 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
           method: "umbra",
           quoteId: umbraVerification.quoteId,
           amountAtomic: umbraVerification.amountAtomic,
-          currency: "SOL",
+          currency: ENV.UMBRA_MINT_SYMBOL as "dUSDC",
+          mint: ENV.UMBRA_MINT_ADDRESS,
+          decimals: ENV.UMBRA_MINT_DECIMALS,
           destinationAddress: umbraVerification.destinationAddress,
           leafIndex: umbraVerification.leafIndex,
           unlockerType: umbraVerification.unlockerType,

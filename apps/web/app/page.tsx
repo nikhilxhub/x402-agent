@@ -23,6 +23,7 @@ const AVAILABLE_MODELS = [
 ] as const;
 
 type PaymentMethod = "standard" | "umbra";
+type TokenSymbol = "SOL" | "USDC" | "USDT" | "dUSDC" | "dUSDT";
 
 type PaymentRequest = {
   receiver: string;
@@ -30,10 +31,12 @@ type PaymentRequest = {
   memo: string;
   expiresInSec: number;
   paymentMethod: PaymentMethod;
-  currency: "SOL" | "USDC";
+  currency: TokenSymbol;
   quoteId: string | null;
   umbra: {
     mint: string;
+    symbol: TokenSymbol;
+    decimals: number;
     network: "mainnet" | "devnet" | "localnet";
     indexerApiEndpoint: string;
     treeIndex: number;
@@ -45,9 +48,11 @@ type AIResponse = {
   ai: string;
   payment?: {
     method: PaymentMethod;
-    currency: "SOL" | "USDC";
+    currency: TokenSymbol;
     amountLamports?: number;
     amountAtomic?: number;
+    mint?: string;
+    decimals?: number;
     receiver?: string;
     explorerUrl?: string;
     destinationAddress?: string;
@@ -86,11 +91,18 @@ declare global {
 }
 
 function formatQuoteAmount(quote: PaymentRequest) {
-  if (quote.currency === "USDC") {
-    return `${(quote.amountLamports / 1_000_000).toFixed(6)} USDC`;
+  if (quote.paymentMethod === "umbra") {
+    const decimals = quote.umbra?.decimals ?? 6;
+    const symbol = quote.umbra?.symbol ?? quote.currency;
+    return `${(quote.amountLamports / 10 ** decimals).toFixed(decimals)} ${symbol}`;
   }
 
   return `${lamportsToSol(quote.amountLamports)} SOL`;
+}
+
+function formatPrivatePaymentAmount(payment: NonNullable<AIResponse["payment"]>) {
+  const decimals = payment.decimals ?? 6;
+  return `${((payment.amountAtomic ?? 0) / 10 ** decimals).toFixed(decimals)} ${payment.currency}`;
 }
 
 export default function Home() {
@@ -332,7 +344,7 @@ export default function Home() {
                     disabled={isSubmitting}
                   >
                     <span className="block text-sm font-semibold">Private</span>
-                    <span className="block text-[11px] text-white/40 mt-1">Umbra private UTXO — shielded SOL via wSOL pool.</span>
+                    <span className="block text-[11px] text-white/40 mt-1">Umbra private UTXO payment using devnet dUSDC.</span>
                   </button>
                 </div>
               </div>
@@ -353,7 +365,7 @@ export default function Home() {
                         <span className="block text-[11px] text-white/40 mt-0.5">{m.provider}</span>
                       </div>
                       <span className="text-[11px] font-mono text-white/50 shrink-0 ml-3">
-                        {m.priceSol}
+                        {paymentMethod === "umbra" ? m.priceUsdc : m.priceSol}
                       </span>
                     </button>
                   ))}
@@ -449,7 +461,7 @@ export default function Home() {
                   <div>
                     <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Private Payment Amount</span>
                     <span className="text-sm font-medium text-white/80">
-                      {result.payment.amountAtomic ? (result.payment.amountAtomic / 1_000_000).toFixed(6) : "0.000000"} USDC
+                      {formatPrivatePaymentAmount(result.payment)}
                     </span>
                   </div>
                 )}

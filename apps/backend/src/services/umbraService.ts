@@ -139,6 +139,14 @@ export function createUmbraQuote(params: {
   };
 
   quoteStore.set(quoteId, quote);
+  console.log("[Umbra][Backend] quote created", {
+    quoteId: quote.quoteId,
+    receiver: quote.receiver,
+    amountAtomic: quote.amountAtomic,
+    mint: ENV.UMBRA_MINT_ADDRESS,
+    symbol: ENV.UMBRA_MINT_SYMBOL,
+    decimals: ENV.UMBRA_MINT_DECIMALS,
+  });
   return quote;
 }
 
@@ -164,17 +172,30 @@ export async function verifyUmbraPayment(params: {
   quoteId: string;
   expectedReceiver: string;
 }): Promise<UmbraVerificationResult> {
+  console.log("[Umbra][Backend] verify start", {
+    quoteId: params.quoteId,
+    expectedReceiver: params.expectedReceiver,
+    mint: ENV.UMBRA_MINT_ADDRESS,
+    treeIndex: ENV.UMBRA_TREE_INDEX,
+  });
   const quote = getUmbraQuote(params.quoteId);
 
   if (!quote) {
+    console.warn("[Umbra][Backend] verify failed: quote missing or expired", {
+      quoteId: params.quoteId,
+    });
     return { success: false, reason: "quote_not_found_or_expired" };
   }
 
   if (quote.used) {
+    console.warn("[Umbra][Backend] verify failed: quote already used", {
+      quoteId: params.quoteId,
+    });
     return { success: false, reason: "quote_already_used" };
   }
 
   if (!ENV.UMBRA_PLATFORM_PRIVATE_KEY) {
+    console.warn("[Umbra][Backend] verify failed: platform private key missing");
     return { success: false, reason: "umbra_platform_private_key_missing" };
   }
 
@@ -191,6 +212,19 @@ export async function verifyUmbraPayment(params: {
     unlockerType?: string;
   }>;
 
+  console.log("[Umbra][Backend] scan results", {
+    quoteId: params.quoteId,
+    candidateCount: candidates.length,
+    candidates: candidates.map((candidate) => ({
+      amount: candidate.amount.toString(),
+      destinationAddress: candidate.destinationAddress,
+      insertionIndex: candidate.insertionIndex.toString(),
+      mint: (candidate as any).mint,
+      unlockerType: candidate.unlockerType || "received",
+      consumed: consumedLeafIndices.has(candidate.insertionIndex.toString()),
+    })),
+  });
+
   const matching = candidates.find((candidate) => {
     const leafKey = candidate.insertionIndex.toString();
     return (
@@ -202,6 +236,12 @@ export async function verifyUmbraPayment(params: {
   });
 
   if (!matching) {
+    console.warn("[Umbra][Backend] verify failed: matching utxo not found", {
+      quoteId: params.quoteId,
+      expectedAmountAtomic: quote.amountAtomic,
+      expectedReceiver: params.expectedReceiver,
+      expectedMint: ENV.UMBRA_MINT_ADDRESS,
+    });
     return { success: false, reason: "matching_umbra_utxo_not_found_yet" };
   }
 
@@ -210,6 +250,12 @@ export async function verifyUmbraPayment(params: {
   quote.used = true;
 
   const timestamp = new Date().toISOString();
+  console.log("[Umbra][Backend] verify success", {
+    quoteId: quote.quoteId,
+    leafIndex,
+    amountAtomic: quote.amountAtomic,
+    destinationAddress: matching.destinationAddress,
+  });
 
   return {
     success: true,

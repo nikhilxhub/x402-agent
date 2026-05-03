@@ -1,14 +1,15 @@
-
 export function createPaymentRequest(opts:{
     receiver:string,
     amountLamports:number;
     memo?:string,
     expiresInSec?:number;
     paymentMethod?: "standard" | "umbra";
-    currency?: "SOL" | "USDC";
+    currency?: "SOL" | "USDC" | "USDT" | "dUSDC" | "dUSDT";
     quoteId?: string;
     umbra?: {
         mint: string;
+        symbol: string;
+        decimals: number;
         network: string;
         indexerApiEndpoint: string;
         treeIndex: number;
