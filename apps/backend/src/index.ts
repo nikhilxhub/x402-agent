@@ -1,4 +1,3 @@
-
 import express from "express"
 import { premiumRouter } from "./routes/premiumRouter";
 import cors from "cors";

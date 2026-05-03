@@ -30,3 +30,40 @@ h1, h2, h3, h4, h5, h6 {
   backdrop-filter: blur(20px);
   border: 1px solid color-mix(in srgb, white 10%, transparent);
 }
+
+/* Solana Wallet Adapter Overrides */
+.wallet-adapter-modal-wrapper {
+  background: #0f0f0f !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 24px !important;
+  font-family: var(--font-instrument-sans), sans-serif !important;
+}
+
+.wallet-adapter-modal-button-close {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.wallet-adapter-modal-title {
+  color: white !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.wallet-adapter-button {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+  border-radius: 12px !important;
+  font-family: var(--font-instrument-sans), sans-serif !important;
+  transition: all 0.2s ease-in-out !important;
+}
+
+.wallet-adapter-button:hover {
+  background-color: rgba(59, 130, 246, 0.1) !important;
+}
+
+.wallet-adapter-modal-list {
+  margin: 0 0 12px !important;
+}
+
+.wallet-adapter-modal-list .wallet-adapter-button {
+  font-weight: 600 !important;
+}

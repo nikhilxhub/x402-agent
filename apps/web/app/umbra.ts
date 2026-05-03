@@ -9,6 +9,7 @@ import {
   getUmbraClient,
   getUserRegistrationFunction,
 } from "@umbra-privacy/sdk";
+import { createOptionalData32 } from "@umbra-privacy/sdk/utils";
 import {
   getCreateReceiverClaimableUtxoFromPublicBalanceProver,
   getUserRegistrationProver,
@@ -18,6 +19,7 @@ type UmbraPaymentRequest = {
   receiver: string;
   amountLamports: number;
   quoteId: string | null;
+  txId: string | null;
   umbra: {
     mint: string;
     symbol: string;
@@ -54,7 +56,7 @@ function toWsUrl(rpcUrl: string) {
   return rpcUrl;
 }
 
-async function getUmbraBrowserSigner() {
+async function getUmbraBrowserSigner(connectedAddress?: string) {
   const { get } = getWallets();
   const wallets = get().filter((wallet) => {
     const featureNames = Object.keys(wallet.features);
@@ -64,9 +66,18 @@ async function getUmbraBrowserSigner() {
     );
   });
 
-  const wallet = wallets[0];
+  // If an address is provided, try to find the wallet that has that account.
+  // Otherwise fall back to the first discovered wallet (old behavior, risky).
+  const wallet = connectedAddress
+    ? wallets.find((w) => w.accounts.some((a) => a.address === connectedAddress))
+    : wallets[0];
+
   if (!wallet) {
-    throw new Error("No Wallet Standard wallet with signTransaction and signMessage support found.");
+    throw new Error(
+      `No Wallet Standard wallet with signTransaction and signMessage support found${
+        connectedAddress ? ` for address ${connectedAddress}` : ""
+      }.`
+    );
   }
 
   const connectFeature = wallet.features[StandardConnect];
@@ -75,7 +86,12 @@ async function getUmbraBrowserSigner() {
   }
 
   const { accounts } = await (connectFeature as any).connect();
-  const account = accounts[0];
+  
+  // Use the account that matches the connected address if provided
+  const account = connectedAddress 
+    ? accounts.find((a: any) => a.address === connectedAddress)
+    : accounts[0];
+
   if (!account) {
     throw new Error("Wallet connected without an active account.");
   }
@@ -86,9 +102,13 @@ async function getUmbraBrowserSigner() {
 export async function createUmbraPrivatePayment(params: {
   paymentRequest: UmbraPaymentRequest;
   rpcUrl: string;
+  connectedAddress?: string;
 }) {
   if (!params.paymentRequest.umbra) {
     throw new Error("Umbra payment metadata missing from backend quote.");
+  }
+  if (!params.paymentRequest.txId) {
+    throw new Error("Umbra txId missing from backend quote.");
   }
 
   console.group("[Umbra][Frontend] createUmbraPrivatePayment");
@@ -96,17 +116,19 @@ export async function createUmbraPrivatePayment(params: {
     receiver: params.paymentRequest.receiver,
     amountAtomic: params.paymentRequest.amountLamports,
     quoteId: params.paymentRequest.quoteId,
+    txId: params.paymentRequest.txId,
     mint: params.paymentRequest.umbra.mint,
     symbol: params.paymentRequest.umbra.symbol,
     decimals: params.paymentRequest.umbra.decimals,
     network: params.paymentRequest.umbra.network,
     treeIndex: params.paymentRequest.umbra.treeIndex,
     rpcUrl: params.rpcUrl,
+    connectedAddress: params.connectedAddress,
   });
 
   try {
     console.info("[Umbra][Frontend] step=getUmbraBrowserSigner:start");
-    const signer = await getUmbraBrowserSigner();
+    const signer = await getUmbraBrowserSigner(params.connectedAddress);
     console.info("[Umbra][Frontend] step=getUmbraBrowserSigner:done", {
       signerAddress: signer.address,
     });
@@ -141,13 +163,31 @@ export async function createUmbraPrivatePayment(params: {
       { client },
       { zkProver: createUtxoProver }
     );
+    const txIdBytes = Uint8Array.from(
+      atob(params.paymentRequest.txId),
+      (char) => char.charCodeAt(0)
+    );
+    const optionalData = createOptionalData32(txIdBytes, "paymentTxId");
 
-    const signatures = await createUtxo({
+    const createUtxoResult = await createUtxo({
       destinationAddress: params.paymentRequest.receiver as any,
       mint: params.paymentRequest.umbra.mint as any,
       amount: BigInt(params.paymentRequest.amountLamports) as any,
+    }, {
+      optionalData,
     });
-    console.info("[Umbra][Frontend] step=createUtxo:done", { signatures });
+    const txSignatures = [
+      createUtxoResult.createProofAccountSignature,
+      createUtxoResult.createUtxoSignature,
+      ...(createUtxoResult.closeProofAccountSignature
+        ? [createUtxoResult.closeProofAccountSignature]
+        : []),
+    ];
+    console.info("[Umbra][Frontend] step=createUtxo:done", {
+      createProofAccountSignature: createUtxoResult.createProofAccountSignature,
+      createUtxoSignature: createUtxoResult.createUtxoSignature,
+      closeProofAccountSignature: createUtxoResult.closeProofAccountSignature,
+    });
 
     console.info("[Umbra][Frontend] step=deriveViewingKey:start");
     const deriveMasterViewingKey = getMasterViewingKeyDeriver({ client });
@@ -156,7 +196,9 @@ export async function createUmbraPrivatePayment(params: {
 
     return {
       quoteId: params.paymentRequest.quoteId || "",
-      txSignatures: signatures,
+      txId: params.paymentRequest.txId,
+      txSignatures,
+      paymentSignature: createUtxoResult.createUtxoSignature,
       viewingKey: viewingKey.toString(),
     };
   } catch (error) {

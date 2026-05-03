@@ -6,6 +6,7 @@ export function createPaymentRequest(opts:{
     paymentMethod?: "standard" | "umbra";
     currency?: "SOL" | "USDC" | "USDT" | "dUSDC" | "dUSDT";
     quoteId?: string;
+    txId?: string;
     umbra?: {
         mint: string;
         symbol: string;
@@ -26,6 +27,7 @@ export function createPaymentRequest(opts:{
         paymentMethod: opts.paymentMethod || "standard",
         currency: opts.currency || "SOL",
         quoteId: opts.quoteId || null,
+        txId: opts.txId || null,
         umbra: opts.umbra || null,
 
     }

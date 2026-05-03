@@ -5,6 +5,10 @@ const premiumBody = z.object({
   prompt: z.string().min(1, "Prompt required"),
   model: z.string().min(1, "Model required"),
   paymentMethod: z.enum(["standard", "umbra"]).optional(),
+  quoteId: z.string().min(1).optional(),
+  txId: z.string().min(1).optional(),
+  callbackSignature: z.string().min(1).optional(),
+  paymentSignatures: z.array(z.string().min(1)).optional(),
 });
 
 export function validatePremiumBody(req: Request, res: Response, next: NextFunction) {

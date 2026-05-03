@@ -20,7 +20,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
     console.log("[PremiumRoute] request", {
       paymentMethod,
       model,
-      hasQuoteId: Boolean(req.headers["x402-quote-id"]),
+      hasQuoteId: Boolean(req.body.quoteId),
       hasSignedTx: Boolean(req.headers["x402-signed-tx"]),
     });
 
@@ -44,7 +44,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
         });
       }
 
-      const quoteId = (req.headers["x402-quote-id"] as string) || null;
+      const quoteId = typeof req.body.quoteId === "string" ? req.body.quoteId : null;
 
       if (!quoteId) {
         console.log("[PremiumRoute] umbra quote requested", {
@@ -70,6 +70,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
             paymentMethod: "umbra",
             currency: ENV.UMBRA_MINT_SYMBOL as "dUSDC",
             quoteId: quote.quoteId,
+            txId: quote.txId,
             umbra: {
               mint: ENV.UMBRA_MINT_ADDRESS,
               symbol: ENV.UMBRA_MINT_SYMBOL,
@@ -84,7 +85,12 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
 
       const umbraVerification = await verifyUmbraPayment({
         quoteId,
-        expectedReceiver: umbraReceiver,
+        txId: typeof req.body.txId === "string" ? req.body.txId : null,
+        callbackSignature:
+          typeof req.body.callbackSignature === "string" ? req.body.callbackSignature : null,
+        paymentSignatures: Array.isArray(req.body.paymentSignatures)
+          ? req.body.paymentSignatures.filter((value: unknown): value is string => typeof value === "string")
+          : [],
       });
 
       if (!umbraVerification.success) {
@@ -100,7 +106,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
 
       console.log("[PremiumRoute] umbra verification succeeded", {
         quoteId,
-        leafIndex: umbraVerification.leafIndex,
+        verifiedSignature: umbraVerification.verifiedSignature,
         amountAtomic: umbraVerification.amountAtomic,
       });
 
@@ -111,18 +117,18 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
       });
 
       return res.json({
-        paidTxSignature: `umbra:${umbraVerification.leafIndex}`,
+        paidTxSignature: umbraVerification.verifiedSignature,
         ai: aiResponse,
         payment: {
           method: "umbra",
           quoteId: umbraVerification.quoteId,
+          txId: umbraVerification.txId,
           amountAtomic: umbraVerification.amountAtomic,
           currency: ENV.UMBRA_MINT_SYMBOL as "dUSDC",
           mint: ENV.UMBRA_MINT_ADDRESS,
           decimals: ENV.UMBRA_MINT_DECIMALS,
           destinationAddress: umbraVerification.destinationAddress,
-          leafIndex: umbraVerification.leafIndex,
-          unlockerType: umbraVerification.unlockerType,
+          verifiedSignature: umbraVerification.verifiedSignature,
           timestamp: umbraVerification.timestamp,
         },
       });

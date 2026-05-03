@@ -5,7 +5,7 @@ import { useWallet } from "../providers/WalletProvider";
 import { truncateAddress } from "../app/utils";
 
 export function Navbar() {
-  const { wallet, isConnecting, connectWallet } = useWallet();
+  const { wallet, isConnecting, connectWallet, disconnectWallet } = useWallet();
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 flex justify-center p-4">
@@ -32,9 +32,14 @@ export function Navbar() {
                 <span className="text-[10px] font-bold uppercase tracking-widest text-[#3b82f6]">Devnet</span>
                 <span className="text-xs font-mono text-white/60">{truncateAddress(wallet)}</span>
               </div>
-              <div className="w-8 h-8 bg-white/[0.05] border border-white/10 rounded-full flex items-center justify-center">
-                 <div className="w-2 h-2 bg-[#10b981] rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-              </div>
+              <button 
+                onClick={disconnectWallet}
+                className="group flex items-center gap-2 bg-white/[0.05] border border-white/10 hover:border-red-500/30 hover:bg-red-500/10 px-3 py-1.5 rounded-xl transition-all"
+                title="Disconnect Wallet"
+              >
+                <div className="w-2 h-2 bg-[#10b981] rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)] group-hover:bg-red-500 group-hover:shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-white/40 group-hover:text-red-400 transition-colors">Disconnect</span>
+              </button>
             </div>
           )}
         </div>

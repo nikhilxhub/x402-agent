@@ -1,12 +1,15 @@
-import { randomUUID } from "crypto";
+import path from "path";
+import { randomBytes, randomUUID } from "crypto";
 import bs58 from "bs58";
-import { Keypair } from "@solana/web3.js";
+import { Connection, Keypair } from "@solana/web3.js";
 import { ENV } from "../config/env";
 
 type UmbraQuote = {
   quoteId: string;
   receiver: string;
   amountAtomic: number;
+  txId: string;
+  txIdBytes: Uint8Array;
   createdAt: number;
   used: boolean;
 };
@@ -15,36 +18,38 @@ type UmbraVerificationResult =
   | {
       success: true;
       quoteId: string;
+      txId: string;
       amountAtomic: number;
       destinationAddress: string;
-      leafIndex: string;
+      verifiedSignature: string;
       timestamp: string;
-      unlockerType: string;
     }
   | {
       success: false;
       reason: string;
     };
 
+type PublicBalanceDepositDecoder = {
+  decode: (data: Uint8Array) => {
+    optionalData: { first: Uint8Array };
+    transferAmount: { first: bigint };
+  };
+};
+
+type UmbraCodamaModule = {
+  UMBRA_PROGRAM_ADDRESS: string;
+  getDepositIntoStealthPoolFromPublicBalanceInstructionDataDecoder: () => PublicBalanceDepositDecoder;
+};
+
 const quoteStore = new Map<string, UmbraQuote>();
-const consumedLeafIndices = new Set<string>();
-let quoteCounter = 0;
-let umbraRuntimePromise: Promise<any> | null = null;
 
-function toWsUrl(rpcUrl: string) {
-  if (ENV.UMBRA_RPC_SUBSCRIPTIONS_URL) {
-    return ENV.UMBRA_RPC_SUBSCRIPTIONS_URL;
-  }
+function loadUmbraCodama(): UmbraCodamaModule {
+  const codamaModulePath = path.resolve(
+    __dirname,
+    "../../../node_modules/.pnpm/node_modules/@umbra-privacy/umbra-codama/dist/index.cjs"
+  );
 
-  if (rpcUrl.startsWith("https://")) {
-    return rpcUrl.replace("https://", "wss://");
-  }
-
-  if (rpcUrl.startsWith("http://")) {
-    return rpcUrl.replace("http://", "ws://");
-  }
-
-  return rpcUrl;
+  return require(codamaModulePath) as UmbraCodamaModule;
 }
 
 function parseSecretKey(secret: string): Uint8Array {
@@ -64,10 +69,10 @@ function parseSecretKey(secret: string): Uint8Array {
 function require64ByteKeypair(bytes: Uint8Array): Uint8Array {
   if (bytes.length !== 64) {
     throw new Error(
-      `UMBRA_PLATFORM_PRIVATE_KEY decoded to ${bytes.length} bytes — must be exactly 64 bytes. ` +
-      `You likely set your wallet ADDRESS (32 bytes) instead of your private key. ` +
-      `Export the full keypair: run 'solana-keygen new --outfile platform.json' and paste the JSON array, ` +
-      `or export from Phantom (Settings → Security & Privacy → Export Private Key).`
+      `UMBRA_PLATFORM_PRIVATE_KEY decoded to ${bytes.length} bytes; it must be exactly 64 bytes. ` +
+        `You likely set your wallet ADDRESS (32 bytes) instead of your private key. ` +
+        `Export the full keypair: run 'solana-keygen new --outfile platform.json' and paste the JSON array, ` +
+        `or export from Phantom (Settings > Security & Privacy > Export Private Key).`
     );
   }
   return bytes;
@@ -83,57 +88,25 @@ export function getUmbraPlatformAddress() {
   ).publicKey.toBase58();
 }
 
-async function getUmbraRuntime() {
-  if (!umbraRuntimePromise) {
-    umbraRuntimePromise = (async () => {
-      const sdk = await import("@umbra-privacy/sdk");
-      const zkProverModule = await import("@umbra-privacy/web-zk-prover");
-      const keypairBytes = require64ByteKeypair(parseSecretKey(ENV.UMBRA_PLATFORM_PRIVATE_KEY));
-      const signer = await sdk.createSignerFromPrivateKeyBytes(keypairBytes);
-
-      const client = await sdk.getUmbraClient({
-        signer,
-        network: ENV.UMBRA_NETWORK as "mainnet" | "devnet" | "localnet",
-        rpcUrl: ENV.SOLANA_RPC_URL,
-        rpcSubscriptionsUrl: toWsUrl(ENV.SOLANA_RPC_URL),
-        indexerApiEndpoint: ENV.UMBRA_INDEXER_API_ENDPOINT,
-        deferMasterSeedSignature: true,
-      });
-
-      console.log("Umbra: Initializing runtime and registering platform...");
-      // zkProver is required when registering with anonymous: true
-      const registrationProver = zkProverModule.getUserRegistrationProver();
-      const register = sdk.getUserRegistrationFunction(
-        { client },
-        { zkProver: registrationProver }
-      );
-      await register({ confidential: true, anonymous: true });
-      console.log("Umbra: Platform registered successfully (anonymous: true)");
-
-      return {
-        scanClaimable: sdk.getClaimableUtxoScannerFunction({ client }),
-      };
-    })();
-  }
-
-  return umbraRuntimePromise;
-}
-
 export async function ensureUmbraPlatformRegistration() {
-  await getUmbraRuntime();
+  if (!ENV.UMBRA_PLATFORM_PRIVATE_KEY) {
+    throw new Error("UMBRA_PLATFORM_PRIVATE_KEY not configured");
+  }
 }
 
 export function createUmbraQuote(params: {
   receiver: string;
   baseAmountAtomic: number;
 }) {
-  quoteCounter = (quoteCounter + 1) % 997;
   const quoteId = randomUUID();
+  const txIdBytes = randomBytes(32);
 
   const quote: UmbraQuote = {
     quoteId,
     receiver: params.receiver,
-    amountAtomic: params.baseAmountAtomic + quoteCounter + 1,
+    amountAtomic: params.baseAmountAtomic,
+    txId: txIdBytes.toString("base64"),
+    txIdBytes,
     createdAt: Date.now(),
     used: false,
   };
@@ -143,6 +116,7 @@ export function createUmbraQuote(params: {
     quoteId: quote.quoteId,
     receiver: quote.receiver,
     amountAtomic: quote.amountAtomic,
+    txId: quote.txId,
     mint: ENV.UMBRA_MINT_ADDRESS,
     symbol: ENV.UMBRA_MINT_SYMBOL,
     decimals: ENV.UMBRA_MINT_DECIMALS,
@@ -168,16 +142,24 @@ function getUmbraQuote(quoteId: string | null | undefined) {
   return quote;
 }
 
+function buffersEqual(left: Uint8Array, right: Uint8Array) {
+  return Buffer.compare(Buffer.from(left), Buffer.from(right)) === 0;
+}
+
 export async function verifyUmbraPayment(params: {
   quoteId: string;
-  expectedReceiver: string;
+  txId: string | null;
+  callbackSignature: string | null;
+  paymentSignatures: string[];
 }): Promise<UmbraVerificationResult> {
   console.log("[Umbra][Backend] verify start", {
     quoteId: params.quoteId,
-    expectedReceiver: params.expectedReceiver,
+    txId: params.txId,
+    callbackSignature: params.callbackSignature,
+    paymentSignatures: params.paymentSignatures,
     mint: ENV.UMBRA_MINT_ADDRESS,
-    treeIndex: ENV.UMBRA_TREE_INDEX,
   });
+
   const quote = getUmbraQuote(params.quoteId);
 
   if (!quote) {
@@ -194,76 +176,118 @@ export async function verifyUmbraPayment(params: {
     return { success: false, reason: "quote_already_used" };
   }
 
-  if (!ENV.UMBRA_PLATFORM_PRIVATE_KEY) {
-    console.warn("[Umbra][Backend] verify failed: platform private key missing");
-    return { success: false, reason: "umbra_platform_private_key_missing" };
-  }
-
-  const runtime = await getUmbraRuntime();
-  const result = await runtime.scanClaimable(BigInt(ENV.UMBRA_TREE_INDEX) as any, 0n as any);
-
-  const candidates = [
-    ...(result?.received || []),
-    ...(result?.publicReceived || []),
-  ] as Array<{
-    amount: bigint;
-    destinationAddress: string;
-    insertionIndex: bigint;
-    unlockerType?: string;
-  }>;
-
-  console.log("[Umbra][Backend] scan results", {
-    quoteId: params.quoteId,
-    candidateCount: candidates.length,
-    candidates: candidates.map((candidate) => ({
-      amount: candidate.amount.toString(),
-      destinationAddress: candidate.destinationAddress,
-      insertionIndex: candidate.insertionIndex.toString(),
-      mint: (candidate as any).mint,
-      unlockerType: candidate.unlockerType || "received",
-      consumed: consumedLeafIndices.has(candidate.insertionIndex.toString()),
-    })),
-  });
-
-  const matching = candidates.find((candidate) => {
-    const leafKey = candidate.insertionIndex.toString();
-    return (
-      candidate.destinationAddress === params.expectedReceiver &&
-      (candidate as any).mint === ENV.UMBRA_MINT_ADDRESS &&
-      Number(candidate.amount) === quote.amountAtomic &&
-      !consumedLeafIndices.has(leafKey)
-    );
-  });
-
-  if (!matching) {
-    console.warn("[Umbra][Backend] verify failed: matching utxo not found", {
+  if (params.txId !== quote.txId) {
+    console.warn("[Umbra][Backend] verify failed: txId mismatch", {
       quoteId: params.quoteId,
-      expectedAmountAtomic: quote.amountAtomic,
-      expectedReceiver: params.expectedReceiver,
-      expectedMint: ENV.UMBRA_MINT_ADDRESS,
+      expectedTxId: quote.txId,
+      submittedTxId: params.txId,
     });
-    return { success: false, reason: "matching_umbra_utxo_not_found_yet" };
+    return { success: false, reason: "optional_data_mismatch" };
   }
 
-  const leafIndex = matching.insertionIndex.toString();
-  consumedLeafIndices.add(leafIndex);
-  quote.used = true;
+  const signaturesToCheck = [
+    ...(params.callbackSignature ? [params.callbackSignature] : []),
+    ...params.paymentSignatures,
+  ].filter(
+    (signature, index, array) =>
+      signature.length > 0 && array.indexOf(signature) === index
+  );
 
-  const timestamp = new Date().toISOString();
-  console.log("[Umbra][Backend] verify success", {
-    quoteId: quote.quoteId,
-    leafIndex,
-    amountAtomic: quote.amountAtomic,
-    destinationAddress: matching.destinationAddress,
+  if (signaturesToCheck.length === 0) {
+    console.warn("[Umbra][Backend] verify failed: no payment signatures supplied", {
+      quoteId: params.quoteId,
+    });
+    return { success: false, reason: "payment_signature_missing" };
+  }
+
+  const {
+    UMBRA_PROGRAM_ADDRESS,
+    getDepositIntoStealthPoolFromPublicBalanceInstructionDataDecoder,
+  } = loadUmbraCodama();
+  const connection = new Connection(ENV.SOLANA_RPC_URL, "confirmed");
+  const decoder = getDepositIntoStealthPoolFromPublicBalanceInstructionDataDecoder();
+
+  for (const signature of signaturesToCheck) {
+    const transaction = await connection.getParsedTransaction(signature, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+    });
+
+    if (!transaction || transaction.meta?.err) {
+      continue;
+    }
+
+    for (const instruction of transaction.transaction.message.instructions) {
+      if (
+        !("programId" in instruction) ||
+        instruction.programId.toBase58() !== UMBRA_PROGRAM_ADDRESS
+      ) {
+        continue;
+      }
+
+      if (!("data" in instruction) || typeof instruction.data !== "string") {
+        continue;
+      }
+
+      try {
+        const decoded = decoder.decode(bs58.decode(instruction.data));
+        const instructionOptionalData = decoded.optionalData.first;
+
+        console.log("[Umbra][Backend] decoded payment instruction", {
+          quoteId: params.quoteId,
+          signature,
+          transferAmount: decoded.transferAmount.first.toString(),
+          optionalDataBase64: Buffer.from(instructionOptionalData).toString("base64"),
+        });
+
+        if (!buffersEqual(instructionOptionalData, quote.txIdBytes)) {
+          continue;
+        }
+
+        if (decoded.transferAmount.first !== BigInt(quote.amountAtomic)) {
+          console.warn("[Umbra][Backend] verify failed: amount mismatch", {
+            quoteId: params.quoteId,
+            signature,
+            expectedAmountAtomic: quote.amountAtomic,
+            actualTransferAmount: decoded.transferAmount.first.toString(),
+          });
+          return { success: false, reason: "payment_amount_mismatch" };
+        }
+
+        quote.used = true;
+        const timestamp = new Date(
+          (transaction.blockTime ?? Math.floor(Date.now() / 1000)) * 1000
+        ).toISOString();
+
+        console.log("[Umbra][Backend] verify success", {
+          quoteId: quote.quoteId,
+          verifiedSignature: signature,
+          amountAtomic: quote.amountAtomic,
+        });
+
+        return {
+          success: true,
+          quoteId: quote.quoteId,
+          txId: quote.txId,
+          amountAtomic: quote.amountAtomic,
+          destinationAddress: quote.receiver,
+          verifiedSignature: signature,
+          timestamp,
+        };
+      } catch (error) {
+        console.warn("[Umbra][Backend] instruction decode skipped", {
+          quoteId: params.quoteId,
+          signature,
+          message: (error as Error).message,
+        });
+      }
+    }
+  }
+
+  console.warn("[Umbra][Backend] verify failed: no matching payment instruction", {
+    quoteId: params.quoteId,
+    signaturesChecked: signaturesToCheck,
+    expectedAmountAtomic: quote.amountAtomic,
   });
-
-  return {
-    success: true,
-    quoteId: quote.quoteId,
-    amountAtomic: quote.amountAtomic,
-    destinationAddress: matching.destinationAddress,
-    leafIndex,
-    timestamp,
-    unlockerType: matching.unlockerType || "received",
-  };
+  return { success: false, reason: "matching_umbra_payment_not_found" };
 }

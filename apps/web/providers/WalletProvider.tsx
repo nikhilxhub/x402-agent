@@ -1,70 +1,84 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import React, { FC, ReactNode, useMemo } from "react";
+import {
+  ConnectionProvider,
+  WalletProvider as SolanaWalletProvider,
+  useWallet as useSolanaWallet,
+} from "@solana/wallet-adapter-react";
+import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
+import {
+  PhantomWalletAdapter,
+  SolflareWalletAdapter,
+  TrustWalletAdapter,
+  LedgerWalletAdapter,
+  CoinbaseWalletAdapter,
+  TorusWalletAdapter,
+} from "@solana/wallet-adapter-wallets";
+import { WalletModalProvider, useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { clusterApiUrl } from "@solana/web3.js";
 
-type PhantomProvider = {
-  isPhantom?: boolean;
-  publicKey?: PublicKey;
-  connect: () => Promise<{ publicKey: PublicKey }>;
-  disconnect?: () => Promise<void>;
-  signTransaction: (transaction: Transaction) => Promise<Transaction>;
-  signAndSendTransaction: (transaction: Transaction) => Promise<{ signature: string }>;
-};
+// Default styles that can be overridden by your app
+import "@solana/wallet-adapter-react-ui/styles.css";
 
-interface WalletContextType {
-  wallet: string;
-  isConnecting: boolean;
-  connectWallet: () => Promise<void>;
-  provider: PhantomProvider | undefined;
-}
+export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  // The network can be set to 'devnet', 'testnet', or 'mainnet-beta'.
+  const network = WalletAdapterNetwork.Devnet;
 
-const WalletContext = createContext<WalletContextType | undefined>(undefined);
+  // You can also provide a custom RPC endpoint.
+  const endpoint = useMemo(() => clusterApiUrl(network), [network]);
 
-export function WalletProvider({ children }: { children: ReactNode }) {
-  const [wallet, setWallet] = useState<string>("");
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [provider, setProvider] = useState<PhantomProvider | undefined>(undefined);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const solana = (window as any).solana;
-      if (solana?.isPhantom) {
-        setProvider(solana);
-        if (solana.publicKey) {
-          setWallet(solana.publicKey.toBase58());
-        }
-      }
-    }
-  }, []);
-
-  const connectWallet = async () => {
-    if (!provider) {
-      alert("Please install Phantom wallet to use this Dapp.");
-      return;
-    }
-    setIsConnecting(true);
-    try {
-      const resp = await provider.connect();
-      setWallet(resp.publicKey.toBase58());
-    } catch (err: any) {
-      console.error("Failed to connect wallet", err);
-    } finally {
-      setIsConnecting(false);
-    }
-  };
+  const wallets = useMemo(
+    () => [
+      new PhantomWalletAdapter(),
+      new SolflareWalletAdapter(),
+      new TrustWalletAdapter(),
+      new LedgerWalletAdapter(),
+      new CoinbaseWalletAdapter(),
+      new TorusWalletAdapter(),
+    ],
+    []
+  );
 
   return (
-    <WalletContext.Provider value={{ wallet, isConnecting, connectWallet, provider }}>
-      {children}
-    </WalletContext.Provider>
+    <ConnectionProvider endpoint={endpoint}>
+      <SolanaWalletProvider wallets={wallets} autoConnect>
+        <WalletModalProvider>{children}</WalletModalProvider>
+      </SolanaWalletProvider>
+    </ConnectionProvider>
   );
-}
+};
 
+// We redefine useWallet to match our previous interface for compatibility
+// but now it uses the real Solana Wallet Adapter under the hood
 export function useWallet() {
-  const context = useContext(WalletContext);
-  if (context === undefined) {
-    throw new Error("useWallet must be used within a WalletProvider");
-  }
-  return context;
+  const {
+    publicKey,
+    wallet,
+    disconnect,
+    select,
+    connecting,
+    wallets,
+    connected,
+    signTransaction,
+  } = useSolanaWallet();
+  const { setVisible } = useWalletModal();
+
+  const connectWallet = async () => {
+    setVisible(true);
+  };
+
+  return {
+    wallet: publicKey ? publicKey.toBase58() : "",
+    isConnecting: connecting,
+    connectWallet,
+    disconnectWallet: disconnect,
+    provider: wallet?.adapter,
+    publicKey,
+    wallets,
+    select,
+    connected,
+    setVisible,
+    signTransaction,
+  };
 }

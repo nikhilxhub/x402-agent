@@ -33,6 +33,7 @@ type PaymentRequest = {
   paymentMethod: PaymentMethod;
   currency: TokenSymbol;
   quoteId: string | null;
+  txId: string | null;
   umbra: {
     mint: string;
     symbol: TokenSymbol;
@@ -56,7 +57,8 @@ type AIResponse = {
     receiver?: string;
     explorerUrl?: string;
     destinationAddress?: string;
-    leafIndex?: string;
+    txId?: string;
+    verifiedSignature?: string;
     timestamp?: string;
   };
   viewingKey?: string;
@@ -75,21 +77,6 @@ function getErrorDetails(data: AIResponse | ErrorResponse | null) {
   return typeof data.details === "string" ? data.details : null;
 }
 
-type PhantomProvider = {
-  isPhantom?: boolean;
-  publicKey?: PublicKey;
-  connect: () => Promise<{ publicKey: PublicKey }>;
-  disconnect?: () => Promise<void>;
-  signTransaction: (transaction: Transaction) => Promise<Transaction>;
-  signAndSendTransaction: (transaction: Transaction) => Promise<{ signature: string }>;
-};
-
-declare global {
-  interface Window {
-    solana?: PhantomProvider;
-  }
-}
-
 function formatQuoteAmount(quote: PaymentRequest) {
   if (quote.paymentMethod === "umbra") {
     const decimals = quote.umbra?.decimals ?? 6;
@@ -106,7 +93,7 @@ function formatPrivatePaymentAmount(payment: NonNullable<AIResponse["payment"]>)
 }
 
 export default function Home() {
-  const { wallet, connectWallet, provider } = useWallet();
+  const { wallet, connectWallet, signTransaction } = useWallet();
   const [isBooting, setIsBooting] = useState(true);
   const [backendOnline, setBackendOnline] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -134,7 +121,7 @@ export default function Home() {
   }, []);
 
   async function handleStandardPayment(paymentRequest: PaymentRequest) {
-    if (!wallet || !provider) {
+    if (!wallet || !signTransaction) {
       throw new Error("Wallet not connected.");
     }
 
@@ -154,7 +141,7 @@ export default function Home() {
       })
     );
 
-    const signedTx = await provider.signTransaction(transaction);
+    const signedTx = await signTransaction(transaction);
     const signedTxBase64 = serializeTransactionToBase64(signedTx);
 
     const finalRes = await fetch(`${BACKEND_URL}/premium`, {
@@ -173,47 +160,32 @@ export default function Home() {
     const privatePayment = await createUmbraPrivatePayment({
       paymentRequest,
       rpcUrl: RPC_URL,
+      connectedAddress: wallet,
     });
 
-    let lastResponse: Response | null = null;
-    let lastData: AIResponse | ErrorResponse | null = null;
+    setStatus("Verifying private payment...");
+    const finalRes = await fetch(`${BACKEND_URL}/premium`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        prompt,
+        paymentMethod: "umbra",
+        quoteId: privatePayment.quoteId,
+        txId: privatePayment.txId,
+        callbackSignature: privatePayment.paymentSignature,
+        paymentSignatures: privatePayment.txSignatures,
+      }),
+    });
 
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      const finalRes = await fetch(`${BACKEND_URL}/premium`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x402-quote-id": privatePayment.quoteId,
-        },
-        body: JSON.stringify({ model: selectedModel, prompt, paymentMethod: "umbra" }),
-      });
-
-      const finalData = (await finalRes.json()) as AIResponse | ErrorResponse;
-      lastResponse = finalRes;
-      lastData = finalData;
-
-      if (
-        finalRes.ok ||
-        getErrorDetails(finalData) !== "matching_umbra_utxo_not_found_yet" ||
-        attempt === 5
-      ) {
-        return {
-          response: finalRes,
-          data: {
-            ...finalData,
-            viewingKey: privatePayment.viewingKey,
-          } as AIResponse,
-        };
-      }
-
-      setStatus(`Waiting for private payment indexing... (${attempt + 1}/6)`);
-      await new Promise((resolve) => window.setTimeout(resolve, 1500));
-    }
+    const finalData = (await finalRes.json()) as AIResponse | ErrorResponse;
 
     return {
-      response: lastResponse as Response,
+      response: finalRes,
       data: {
-        ...(lastData || {}),
+        ...(finalData || {}),
         viewingKey: privatePayment.viewingKey,
       } as AIResponse,
     };
@@ -451,7 +423,7 @@ export default function Home() {
               <div className="mt-10 pt-8 border-t border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div>
                   <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Payment Proof</span>
-                  <span className="text-[11px] font-mono break-all text-white/50 block leading-tight">{result.paidTxSignature}</span>
+                  <span className="text-[11px] font-mono break-all text-white/50 block leading-tight">{result.payment?.verifiedSignature || result.paidTxSignature}</span>
                 </div>
                 <div>
                   <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Runtime Model</span>
