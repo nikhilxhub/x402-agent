@@ -1,4 +1,4 @@
-import path from "path";
+import { createRequire } from "module";
 import { randomBytes, randomUUID } from "crypto";
 import bs58 from "bs58";
 import { Connection, Keypair } from "@solana/web3.js";
@@ -44,12 +44,10 @@ type UmbraCodamaModule = {
 const quoteStore = new Map<string, UmbraQuote>();
 
 function loadUmbraCodama(): UmbraCodamaModule {
-  const codamaModulePath = path.resolve(
-    __dirname,
-    "../../../node_modules/.pnpm/node_modules/@umbra-privacy/umbra-codama/dist/index.cjs"
-  );
+  const sdkEntryPoint = require.resolve("@umbra-privacy/sdk");
+  const sdkRequire = createRequire(sdkEntryPoint);
 
-  return require(codamaModulePath) as UmbraCodamaModule;
+  return sdkRequire("@umbra-privacy/umbra-codama") as UmbraCodamaModule;
 }
 
 function parseSecretKey(secret: string): Uint8Array {
