@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "crypto";
 import bs58 from "bs58";
 import { Connection, Keypair } from "@solana/web3.js";
 import { ENV } from "../config/env";
+import { logInfo, logWarn } from "../utils/logging";
 
 type UmbraQuote = {
   quoteId: string;
@@ -29,25 +30,64 @@ type UmbraVerificationResult =
       reason: string;
     };
 
+type PublicStealthPoolDepositInputBufferDecoder = {
+  decode: (data: Uint8Array) => {
+    offset: { first: bigint };
+    optionalData: { first: Uint8Array };
+  };
+};
+
 type PublicBalanceDepositDecoder = {
   decode: (data: Uint8Array) => {
-    optionalData: { first: Uint8Array };
+    publicStealthPoolDepositInputBufferOffset: { first: bigint };
     transferAmount: { first: bigint };
   };
 };
 
 type UmbraCodamaModule = {
   UMBRA_PROGRAM_ADDRESS: string;
+  getCreatePublicStealthPoolDepositInputBufferInstructionDataDecoder: () => PublicStealthPoolDepositInputBufferDecoder;
   getDepositIntoStealthPoolFromPublicBalanceInstructionDataDecoder: () => PublicBalanceDepositDecoder;
+};
+
+type UmbraConstantsModule = {
+  getNetworkConfig: (network: "mainnet" | "devnet" | "localnet") => {
+    programId: string;
+  };
+};
+
+type ParsedInstructionCandidate = {
+  source: string;
+  programId: string | null;
+  data: string | null;
+};
+
+type BufferInstructionMatch = {
+  signature: string;
+  source: string;
+  offset: bigint;
+  optionalDataBase64: string;
+};
+
+type DepositInstructionMatch = {
+  signature: string;
+  source: string;
+  offset: bigint;
+  transferAmount: bigint;
 };
 
 const quoteStore = new Map<string, UmbraQuote>();
 
-function loadUmbraCodama(): UmbraCodamaModule {
+function loadUmbraModules() {
   const sdkEntryPoint = require.resolve("@umbra-privacy/sdk");
   const sdkRequire = createRequire(sdkEntryPoint);
+  const codama = sdkRequire("@umbra-privacy/umbra-codama") as UmbraCodamaModule;
+  const constants = sdkRequire("@umbra-privacy/sdk/constants") as UmbraConstantsModule;
 
-  return sdkRequire("@umbra-privacy/umbra-codama") as UmbraCodamaModule;
+  return {
+    codama,
+    constants,
+  };
 }
 
 function parseSecretKey(secret: string): Uint8Array {
@@ -95,6 +135,7 @@ export async function ensureUmbraPlatformRegistration() {
 export function createUmbraQuote(params: {
   receiver: string;
   baseAmountAtomic: number;
+  traceId?: string;
 }) {
   const quoteId = randomUUID();
   const txIdBytes = randomBytes(32);
@@ -110,7 +151,8 @@ export function createUmbraQuote(params: {
   };
 
   quoteStore.set(quoteId, quote);
-  console.log("[Umbra][Backend] quote created", {
+  logInfo("Umbra.Backend", "quote.created", {
+    traceId: params.traceId,
     quoteId: quote.quoteId,
     receiver: quote.receiver,
     amountAtomic: quote.amountAtomic,
@@ -118,6 +160,7 @@ export function createUmbraQuote(params: {
     mint: ENV.UMBRA_MINT_ADDRESS,
     symbol: ENV.UMBRA_MINT_SYMBOL,
     decimals: ENV.UMBRA_MINT_DECIMALS,
+    network: ENV.UMBRA_NETWORK,
   });
   return quote;
 }
@@ -144,38 +187,89 @@ function buffersEqual(left: Uint8Array, right: Uint8Array) {
   return Buffer.compare(Buffer.from(left), Buffer.from(right)) === 0;
 }
 
+function normalizeProgramId(value: unknown) {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "object" && value !== null && "toBase58" in value) {
+    const toBase58 = (value as { toBase58?: () => string }).toBase58;
+    if (typeof toBase58 === "function") {
+      return toBase58.call(value);
+    }
+  }
+
+  return null;
+}
+
+function getInstructionCandidates(transaction: Awaited<ReturnType<Connection["getParsedTransaction"]>>) {
+  const topLevel = transaction?.transaction.message.instructions ?? [];
+  const inner = transaction?.meta?.innerInstructions ?? [];
+  const candidates: ParsedInstructionCandidate[] = [];
+
+  for (const instruction of topLevel) {
+    candidates.push({
+      source: "outer",
+      programId: normalizeProgramId("programId" in instruction ? instruction.programId : null),
+      data: "data" in instruction && typeof instruction.data === "string" ? instruction.data : null,
+    });
+  }
+
+  inner.forEach((entry, entryIndex) => {
+    entry.instructions.forEach((instruction, instructionIndex) => {
+      candidates.push({
+        source: `inner:${entryIndex}:${instructionIndex}`,
+        programId: normalizeProgramId("programId" in instruction ? instruction.programId : null),
+        data: "data" in instruction && typeof instruction.data === "string" ? instruction.data : null,
+      });
+    });
+  });
+
+  return candidates;
+}
+
 export async function verifyUmbraPayment(params: {
   quoteId: string;
   txId: string | null;
   callbackSignature: string | null;
   paymentSignatures: string[];
+  traceId?: string;
 }): Promise<UmbraVerificationResult> {
-  console.log("[Umbra][Backend] verify start", {
+  logInfo("Umbra.Backend", "verify.start", {
+    traceId: params.traceId,
     quoteId: params.quoteId,
     txId: params.txId,
     callbackSignature: params.callbackSignature,
     paymentSignatures: params.paymentSignatures,
     mint: ENV.UMBRA_MINT_ADDRESS,
+    network: ENV.UMBRA_NETWORK,
   });
 
   const quote = getUmbraQuote(params.quoteId);
 
   if (!quote) {
-    console.warn("[Umbra][Backend] verify failed: quote missing or expired", {
+    logWarn("Umbra.Backend", "verify.failed.quote_missing_or_expired", {
+      traceId: params.traceId,
       quoteId: params.quoteId,
     });
     return { success: false, reason: "quote_not_found_or_expired" };
   }
 
   if (quote.used) {
-    console.warn("[Umbra][Backend] verify failed: quote already used", {
+    logWarn("Umbra.Backend", "verify.failed.quote_already_used", {
+      traceId: params.traceId,
       quoteId: params.quoteId,
     });
     return { success: false, reason: "quote_already_used" };
   }
 
   if (params.txId !== quote.txId) {
-    console.warn("[Umbra][Backend] verify failed: txId mismatch", {
+    logWarn("Umbra.Backend", "verify.failed.txid_mismatch", {
+      traceId: params.traceId,
       quoteId: params.quoteId,
       expectedTxId: quote.txId,
       submittedTxId: params.txId,
@@ -192,18 +286,37 @@ export async function verifyUmbraPayment(params: {
   );
 
   if (signaturesToCheck.length === 0) {
-    console.warn("[Umbra][Backend] verify failed: no payment signatures supplied", {
+    logWarn("Umbra.Backend", "verify.failed.payment_signature_missing", {
+      traceId: params.traceId,
       quoteId: params.quoteId,
     });
     return { success: false, reason: "payment_signature_missing" };
   }
 
+  const { codama, constants } = loadUmbraModules();
   const {
-    UMBRA_PROGRAM_ADDRESS,
+    getCreatePublicStealthPoolDepositInputBufferInstructionDataDecoder,
     getDepositIntoStealthPoolFromPublicBalanceInstructionDataDecoder,
-  } = loadUmbraCodama();
+  } = codama;
+  const { programId: networkProgramId } = constants.getNetworkConfig(
+    ENV.UMBRA_NETWORK as "mainnet" | "devnet" | "localnet"
+  );
   const connection = new Connection(ENV.SOLANA_RPC_URL, "confirmed");
+  const createBufferDecoder =
+    getCreatePublicStealthPoolDepositInputBufferInstructionDataDecoder();
   const decoder = getDepositIntoStealthPoolFromPublicBalanceInstructionDataDecoder();
+  const bufferInstructionMatches: BufferInstructionMatch[] = [];
+  const depositInstructionMatches: DepositInstructionMatch[] = [];
+
+  logInfo("Umbra.Backend", "verify.config", {
+    traceId: params.traceId,
+    quoteId: params.quoteId,
+    network: ENV.UMBRA_NETWORK,
+    rpcUrl: ENV.SOLANA_RPC_URL,
+    mint: ENV.UMBRA_MINT_ADDRESS,
+    expectedProgramId: networkProgramId,
+    codamaDefaultProgramId: codama.UMBRA_PROGRAM_ADDRESS,
+  });
 
   for (const signature of signaturesToCheck) {
     const transaction = await connection.getParsedTransaction(signature, {
@@ -211,81 +324,189 @@ export async function verifyUmbraPayment(params: {
       maxSupportedTransactionVersion: 0,
     });
 
-    if (!transaction || transaction.meta?.err) {
+    if (!transaction) {
+      logWarn("Umbra.Backend", "verify.signature.transaction_missing", {
+        traceId: params.traceId,
+        quoteId: params.quoteId,
+        signature,
+      });
       continue;
     }
 
-    for (const instruction of transaction.transaction.message.instructions) {
-      if (
-        !("programId" in instruction) ||
-        instruction.programId.toBase58() !== UMBRA_PROGRAM_ADDRESS
-      ) {
+    if (transaction.meta?.err) {
+      logWarn("Umbra.Backend", "verify.signature.transaction_error", {
+        traceId: params.traceId,
+        quoteId: params.quoteId,
+        signature,
+        transactionError: transaction.meta.err,
+      });
+      continue;
+    }
+
+    const instructionCandidates = getInstructionCandidates(transaction);
+
+    logInfo("Umbra.Backend", "verify.signature.inspect", {
+      traceId: params.traceId,
+      quoteId: params.quoteId,
+      signature,
+      blockTime: transaction.blockTime,
+      instructionCount: instructionCandidates.length,
+      programIds: instructionCandidates.map((candidate) => candidate.programId),
+    });
+
+    for (const instruction of instructionCandidates) {
+      if (instruction.programId !== networkProgramId) {
         continue;
       }
 
-      if (!("data" in instruction) || typeof instruction.data !== "string") {
+      if (!instruction.data) {
+        logWarn("Umbra.Backend", "verify.instruction.missing_data", {
+          traceId: params.traceId,
+          quoteId: params.quoteId,
+          signature,
+          source: instruction.source,
+          programId: instruction.programId,
+        });
         continue;
+      }
+
+      const instructionBytes = bs58.decode(instruction.data);
+
+      try {
+        const decoded = createBufferDecoder.decode(instructionBytes);
+        const optionalDataBase64 = Buffer.from(decoded.optionalData.first).toString("base64");
+
+        bufferInstructionMatches.push({
+          signature,
+          source: instruction.source,
+          offset: decoded.offset.first,
+          optionalDataBase64,
+        });
+
+        logInfo("Umbra.Backend", "verify.buffer_instruction.decoded", {
+          traceId: params.traceId,
+          quoteId: params.quoteId,
+          signature,
+          source: instruction.source,
+          programId: instruction.programId,
+          optionalDataBase64,
+          expectedOptionalDataBase64: quote.txId,
+          offset: decoded.offset.first.toString(),
+        });
+      } catch {
+        // Not a create-buffer instruction, continue to the deposit decoder.
       }
 
       try {
-        const decoded = decoder.decode(bs58.decode(instruction.data));
-        const instructionOptionalData = decoded.optionalData.first;
+        const decoded = decoder.decode(instructionBytes);
 
-        console.log("[Umbra][Backend] decoded payment instruction", {
+        depositInstructionMatches.push({
+          signature,
+          source: instruction.source,
+          offset: decoded.publicStealthPoolDepositInputBufferOffset.first,
+          transferAmount: decoded.transferAmount.first,
+        });
+
+        logInfo("Umbra.Backend", "verify.deposit_instruction.decoded", {
+          traceId: params.traceId,
           quoteId: params.quoteId,
           signature,
+          source: instruction.source,
+          programId: instruction.programId,
           transferAmount: decoded.transferAmount.first.toString(),
-          optionalDataBase64: Buffer.from(instructionOptionalData).toString("base64"),
+          offset: decoded.publicStealthPoolDepositInputBufferOffset.first.toString(),
         });
-
-        if (!buffersEqual(instructionOptionalData, quote.txIdBytes)) {
-          continue;
-        }
-
-        if (decoded.transferAmount.first !== BigInt(quote.amountAtomic)) {
-          console.warn("[Umbra][Backend] verify failed: amount mismatch", {
-            quoteId: params.quoteId,
-            signature,
-            expectedAmountAtomic: quote.amountAtomic,
-            actualTransferAmount: decoded.transferAmount.first.toString(),
-          });
-          return { success: false, reason: "payment_amount_mismatch" };
-        }
-
-        quote.used = true;
-        const timestamp = new Date(
-          (transaction.blockTime ?? Math.floor(Date.now() / 1000)) * 1000
-        ).toISOString();
-
-        console.log("[Umbra][Backend] verify success", {
-          quoteId: quote.quoteId,
-          verifiedSignature: signature,
-          amountAtomic: quote.amountAtomic,
-        });
-
-        return {
-          success: true,
-          quoteId: quote.quoteId,
-          txId: quote.txId,
-          amountAtomic: quote.amountAtomic,
-          destinationAddress: quote.receiver,
-          verifiedSignature: signature,
-          timestamp,
-        };
       } catch (error) {
-        console.warn("[Umbra][Backend] instruction decode skipped", {
+        logWarn("Umbra.Backend", "verify.instruction.decode_skipped", {
+          traceId: params.traceId,
           quoteId: params.quoteId,
           signature,
+          source: instruction.source,
+          programId: instruction.programId,
           message: (error as Error).message,
         });
       }
     }
   }
 
-  console.warn("[Umbra][Backend] verify failed: no matching payment instruction", {
-    quoteId: params.quoteId,
-    signaturesChecked: signaturesToCheck,
-    expectedAmountAtomic: quote.amountAtomic,
+  const matchingBuffer = bufferInstructionMatches.find((candidate) =>
+    buffersEqual(Buffer.from(candidate.optionalDataBase64, "base64"), quote.txIdBytes)
+  );
+
+  if (!matchingBuffer) {
+    logWarn("Umbra.Backend", "verify.failed.optional_data_not_found", {
+      traceId: params.traceId,
+      quoteId: params.quoteId,
+      signaturesChecked: signaturesToCheck,
+      expectedOptionalDataBase64: quote.txId,
+      bufferInstructionMatches: bufferInstructionMatches.map((candidate) => ({
+        signature: candidate.signature,
+        source: candidate.source,
+        offset: candidate.offset.toString(),
+        optionalDataBase64: candidate.optionalDataBase64,
+      })),
+    });
+    return { success: false, reason: "matching_umbra_payment_not_found" };
+  }
+
+  const matchingDeposit = depositInstructionMatches.find(
+    (candidate) => candidate.offset === matchingBuffer.offset
+  );
+
+  if (!matchingDeposit) {
+    logWarn("Umbra.Backend", "verify.failed.deposit_for_buffer_not_found", {
+      traceId: params.traceId,
+      quoteId: params.quoteId,
+      bufferSignature: matchingBuffer.signature,
+      offset: matchingBuffer.offset.toString(),
+      depositInstructionMatches: depositInstructionMatches.map((candidate) => ({
+        signature: candidate.signature,
+        source: candidate.source,
+        offset: candidate.offset.toString(),
+        transferAmount: candidate.transferAmount.toString(),
+      })),
+    });
+    return { success: false, reason: "matching_umbra_payment_not_found" };
+  }
+
+  if (matchingDeposit.transferAmount !== BigInt(quote.amountAtomic)) {
+    logWarn("Umbra.Backend", "verify.failed.payment_amount_mismatch", {
+      traceId: params.traceId,
+      quoteId: params.quoteId,
+      bufferSignature: matchingBuffer.signature,
+      verifiedSignature: matchingDeposit.signature,
+      expectedAmountAtomic: quote.amountAtomic,
+      actualTransferAmount: matchingDeposit.transferAmount.toString(),
+      offset: matchingDeposit.offset.toString(),
+    });
+    return { success: false, reason: "payment_amount_mismatch" };
+  }
+
+  const verifiedTransaction = await connection.getParsedTransaction(matchingDeposit.signature, {
+    commitment: "confirmed",
+    maxSupportedTransactionVersion: 0,
   });
-  return { success: false, reason: "matching_umbra_payment_not_found" };
+  quote.used = true;
+  const timestamp = new Date(
+    (verifiedTransaction?.blockTime ?? Math.floor(Date.now() / 1000)) * 1000
+  ).toISOString();
+
+  logInfo("Umbra.Backend", "verify.success", {
+    traceId: params.traceId,
+    quoteId: quote.quoteId,
+    verifiedSignature: matchingDeposit.signature,
+    bufferSignature: matchingBuffer.signature,
+    amountAtomic: quote.amountAtomic,
+    offset: matchingDeposit.offset.toString(),
+  });
+
+  return {
+    success: true,
+    quoteId: quote.quoteId,
+    txId: quote.txId,
+    amountAtomic: quote.amountAtomic,
+    destinationAddress: quote.receiver,
+    verifiedSignature: matchingDeposit.signature,
+    timestamp,
+  };
 }

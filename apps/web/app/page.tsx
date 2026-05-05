@@ -45,6 +45,7 @@ type PaymentRequest = {
 };
 
 type AIResponse = {
+  traceId?: string;
   paidTxSignature: string;
   ai: string;
   payment?: {
@@ -65,9 +66,18 @@ type AIResponse = {
 };
 
 type ErrorResponse = {
+  traceId?: string;
   error?: string;
   details?: string;
 };
+
+function createTraceId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `trace-${Date.now()}`;
+}
 
 function getErrorDetails(data: AIResponse | ErrorResponse | null) {
   if (!data || typeof data !== "object" || !("details" in data)) {
@@ -120,7 +130,7 @@ export default function Home() {
     checkHealth();
   }, []);
 
-  async function handleStandardPayment(paymentRequest: PaymentRequest) {
+  async function handleStandardPayment(paymentRequest: PaymentRequest, traceId: string) {
     if (!wallet || !signTransaction) {
       throw new Error("Wallet not connected.");
     }
@@ -149,6 +159,7 @@ export default function Home() {
       headers: {
         "Content-Type": "application/json",
         "x402-signed-tx": signedTxBase64,
+        "x-client-trace-id": traceId,
       },
       body: JSON.stringify({ model: selectedModel, prompt, paymentMethod: "standard" }),
     });
@@ -156,18 +167,27 @@ export default function Home() {
     return finalRes;
   }
 
-  async function handleUmbraPayment(paymentRequest: PaymentRequest) {
+  async function handleUmbraPayment(paymentRequest: PaymentRequest, traceId: string) {
     const privatePayment = await createUmbraPrivatePayment({
       paymentRequest,
       rpcUrl: RPC_URL,
       connectedAddress: wallet,
+      traceId,
     });
 
     setStatus("Verifying private payment...");
+    console.info("[Premium][Frontend] verify.request", {
+      traceId,
+      quoteId: privatePayment.quoteId,
+      txId: privatePayment.txId,
+      callbackSignature: privatePayment.paymentSignature,
+      paymentSignatures: privatePayment.txSignatures,
+    });
     const finalRes = await fetch(`${BACKEND_URL}/premium`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-client-trace-id": traceId,
       },
       body: JSON.stringify({
         model: selectedModel,
@@ -181,6 +201,13 @@ export default function Home() {
     });
 
     const finalData = (await finalRes.json()) as AIResponse | ErrorResponse;
+    console.info("[Premium][Frontend] verify.response", {
+      traceId,
+      status: finalRes.status,
+      ok: finalRes.ok,
+      backendTraceId: finalData?.traceId ?? null,
+      details: getErrorDetails(finalData),
+    });
 
     return {
       response: finalRes,
@@ -206,23 +233,52 @@ export default function Home() {
     setStatus("Requesting payment quote...");
 
     try {
+      const traceId = createTraceId();
+      console.group("[Premium][Frontend] submission");
+      console.info("[Premium][Frontend] submission.start", {
+        traceId,
+        model: selectedModel,
+        paymentMethod,
+        wallet,
+      });
       const initRes = await fetch(`${BACKEND_URL}/premium`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-client-trace-id": traceId,
+        },
         body: JSON.stringify({ model: selectedModel, prompt, paymentMethod }),
       });
 
       if (initRes.status !== 402) {
         const data = await initRes.json();
+        console.error("[Premium][Frontend] quote.unexpected_response", {
+          traceId,
+          status: initRes.status,
+          body: data,
+        });
         throw new Error(data.error || "Unexpected response from backend");
       }
 
-      const { paymentRequest } = (await initRes.json()) as { paymentRequest: PaymentRequest };
+      const quoteData = (await initRes.json()) as {
+        traceId?: string;
+        paymentRequest: PaymentRequest;
+      };
+      console.info("[Premium][Frontend] quote.response", {
+        traceId,
+        backendTraceId: quoteData.traceId ?? null,
+        quoteId: quoteData.paymentRequest.quoteId,
+        txId: quoteData.paymentRequest.txId,
+        receiver: quoteData.paymentRequest.receiver,
+        amountLamports: quoteData.paymentRequest.amountLamports,
+        paymentMethod: quoteData.paymentRequest.paymentMethod,
+      });
+      const { paymentRequest } = quoteData;
       setPaymentQuote(paymentRequest);
 
       if (paymentMethod === "umbra") {
         setStatus("Creating private Umbra payment...");
-        const { response, data } = await handleUmbraPayment(paymentRequest);
+        const { response, data } = await handleUmbraPayment(paymentRequest, traceId);
         if (!response.ok) {
           const detailMsg = getErrorDetails(data)
             ? `: ${getErrorDetails(data)}`
@@ -238,8 +294,14 @@ export default function Home() {
       }
 
       setStatus("Awaiting signature...");
-      const finalRes = await handleStandardPayment(paymentRequest);
+      const finalRes = await handleStandardPayment(paymentRequest, traceId);
       const finalData = (await finalRes.json()) as AIResponse;
+      console.info("[Premium][Frontend] standard.response", {
+        traceId,
+        status: finalRes.status,
+        ok: finalRes.ok,
+        backendTraceId: finalData?.traceId ?? null,
+      });
       if (!finalRes.ok) {
         const detailMsg = (finalData as any).details
           ? `: ${JSON.stringify((finalData as any).details)}`
@@ -252,9 +314,13 @@ export default function Home() {
       setResult(finalData);
       setStatus("Completed");
     } catch (err: any) {
+      console.error("[Premium][Frontend] submission.failed", {
+        message: err.message || "Request failed",
+      });
       setError(err.message || "Request failed");
       setStatus("Failed");
     } finally {
+      console.groupEnd();
       setIsSubmitting(false);
     }
   }

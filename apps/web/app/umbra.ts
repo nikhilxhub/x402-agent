@@ -65,6 +65,15 @@ async function getUmbraBrowserSigner(connectedAddress?: string) {
       featureNames.includes("solana:signMessage")
     );
   });
+  console.info("[Umbra][Frontend] wallet-standard.discovery", {
+    connectedAddress,
+    walletCount: wallets.length,
+    wallets: wallets.map((wallet) => ({
+      name: wallet.name,
+      accounts: wallet.accounts.map((account) => account.address),
+      features: Object.keys(wallet.features),
+    })),
+  });
 
   // If an address is provided, try to find the wallet that has that account.
   // Otherwise fall back to the first discovered wallet (old behavior, risky).
@@ -85,10 +94,19 @@ async function getUmbraBrowserSigner(connectedAddress?: string) {
     throw new Error("Selected wallet does not support Wallet Standard connect.");
   }
 
+  console.info("[Umbra][Frontend] wallet-standard.selected", {
+    walletName: wallet.name,
+    connectedAddress,
+    availableAccounts: wallet.accounts.map((account) => account.address),
+  });
   const { accounts } = await (connectFeature as any).connect();
-  
+  console.info("[Umbra][Frontend] wallet-standard.connect_result", {
+    walletName: wallet.name,
+    returnedAccounts: accounts.map((account: any) => account.address),
+  });
+
   // Use the account that matches the connected address if provided
-  const account = connectedAddress 
+  const account = connectedAddress
     ? accounts.find((a: any) => a.address === connectedAddress)
     : accounts[0];
 
@@ -103,6 +121,7 @@ export async function createUmbraPrivatePayment(params: {
   paymentRequest: UmbraPaymentRequest;
   rpcUrl: string;
   connectedAddress?: string;
+  traceId?: string;
 }) {
   if (!params.paymentRequest.umbra) {
     throw new Error("Umbra payment metadata missing from backend quote.");
@@ -113,6 +132,7 @@ export async function createUmbraPrivatePayment(params: {
 
   console.group("[Umbra][Frontend] createUmbraPrivatePayment");
   console.info("[Umbra][Frontend] payment request", {
+    traceId: params.traceId,
     receiver: params.paymentRequest.receiver,
     amountAtomic: params.paymentRequest.amountLamports,
     quoteId: params.paymentRequest.quoteId,
@@ -127,13 +147,18 @@ export async function createUmbraPrivatePayment(params: {
   });
 
   try {
-    console.info("[Umbra][Frontend] step=getUmbraBrowserSigner:start");
+    console.info("[Umbra][Frontend] step=getUmbraBrowserSigner:start", {
+      traceId: params.traceId,
+    });
     const signer = await getUmbraBrowserSigner(params.connectedAddress);
     console.info("[Umbra][Frontend] step=getUmbraBrowserSigner:done", {
+      traceId: params.traceId,
       signerAddress: signer.address,
     });
 
-    console.info("[Umbra][Frontend] step=getUmbraClient:start");
+    console.info("[Umbra][Frontend] step=getUmbraClient:start", {
+      traceId: params.traceId,
+    });
     const client = await getUmbraClient({
       signer,
       network: params.paymentRequest.umbra.network,
@@ -142,19 +167,26 @@ export async function createUmbraPrivatePayment(params: {
       indexerApiEndpoint: params.paymentRequest.umbra.indexerApiEndpoint,
       deferMasterSeedSignature: true,
     });
-    console.info("[Umbra][Frontend] step=getUmbraClient:done");
+    console.info("[Umbra][Frontend] step=getUmbraClient:done", {
+      traceId: params.traceId,
+    });
 
     const registrationProver = getUserRegistrationProver();
     const createUtxoProver = getCreateReceiverClaimableUtxoFromPublicBalanceProver();
 
-    console.info("[Umbra][Frontend] step=register:start");
+    console.info("[Umbra][Frontend] step=register:start", {
+      traceId: params.traceId,
+    });
     const register = getUserRegistrationFunction({ client }, {
       zkProver: registrationProver,
     });
     await register({ confidential: true, anonymous: true });
-    console.info("[Umbra][Frontend] step=register:done");
+    console.info("[Umbra][Frontend] step=register:done", {
+      traceId: params.traceId,
+    });
 
     console.info("[Umbra][Frontend] step=createUtxo:start", {
+      traceId: params.traceId,
       destinationAddress: params.paymentRequest.receiver,
       mint: params.paymentRequest.umbra.mint,
       amountAtomic: params.paymentRequest.amountLamports,
@@ -184,15 +216,21 @@ export async function createUmbraPrivatePayment(params: {
         : []),
     ];
     console.info("[Umbra][Frontend] step=createUtxo:done", {
+      traceId: params.traceId,
       createProofAccountSignature: createUtxoResult.createProofAccountSignature,
       createUtxoSignature: createUtxoResult.createUtxoSignature,
       closeProofAccountSignature: createUtxoResult.closeProofAccountSignature,
+      txSignatures,
     });
 
-    console.info("[Umbra][Frontend] step=deriveViewingKey:start");
+    console.info("[Umbra][Frontend] step=deriveViewingKey:start", {
+      traceId: params.traceId,
+    });
     const deriveMasterViewingKey = getMasterViewingKeyDeriver({ client });
     const viewingKey = await deriveMasterViewingKey();
-    console.info("[Umbra][Frontend] step=deriveViewingKey:done");
+    console.info("[Umbra][Frontend] step=deriveViewingKey:done", {
+      traceId: params.traceId,
+    });
 
     return {
       quoteId: params.paymentRequest.quoteId || "",
@@ -202,7 +240,10 @@ export async function createUmbraPrivatePayment(params: {
       viewingKey: viewingKey.toString(),
     };
   } catch (error) {
-    console.error("[Umbra][Frontend] createUmbraPrivatePayment failed", formatError(error));
+    console.error("[Umbra][Frontend] createUmbraPrivatePayment failed", {
+      traceId: params.traceId,
+      ...formatError(error),
+    });
     throw error;
   } finally {
     console.groupEnd();

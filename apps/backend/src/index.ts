@@ -1,15 +1,19 @@
-import express from "express"
+import express from "express";
 import { premiumRouter } from "./routes/premiumRouter";
 import cors from "cors";
-const app = express();
-app.use(cors())
-app.use(express.json())
+import { attachRequestContext, logInfo } from "./utils/logging";
 
-app.use("/premium",premiumRouter)
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(attachRequestContext);
+
+app.use("/premium", premiumRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-
-app.listen(3000, () =>{
-    console.log(`server running on 3000`);
-})
+app.listen(3000, () => {
+  logInfo("Server", "listening", {
+    port: 3000,
+  });
+});

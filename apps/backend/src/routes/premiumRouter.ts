@@ -11,13 +11,19 @@ import {
   verifyUmbraPayment,
 } from "../services/umbraService";
 import { ENV } from "../config/env";
+import { getClientTraceId, getRequestId, logError, logInfo, logWarn } from "../utils/logging";
 
 export const premiumRouter: Router = Router();
 
 premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: express.Response) => {
+  const requestId = getRequestId(res);
+  const clientTraceId = getClientTraceId(res);
+
   try {
     const { model, prompt, paymentMethod = "standard" } = req.body;
-    console.log("[PremiumRoute] request", {
+    logInfo("PremiumRoute", "request.received", {
+      requestId,
+      clientTraceId,
       paymentMethod,
       model,
       hasQuoteId: Boolean(req.body.quoteId),
@@ -47,20 +53,25 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
       const quoteId = typeof req.body.quoteId === "string" ? req.body.quoteId : null;
 
       if (!quoteId) {
-        console.log("[PremiumRoute] umbra quote requested", {
+        logInfo("PremiumRoute", "umbra.quote.requested", {
+          requestId,
+          clientTraceId,
           model: aiModel,
           amountAtomic: rateUsdc,
           mint: ENV.UMBRA_MINT_ADDRESS,
           symbol: ENV.UMBRA_MINT_SYMBOL,
+          network: ENV.UMBRA_NETWORK,
         });
         await ensureUmbraPlatformRegistration();
 
         const quote = createUmbraQuote({
           receiver: umbraReceiver,
           baseAmountAtomic: rateUsdc,
+          traceId: requestId,
         });
 
         return res.status(402).json({
+          traceId: requestId,
           message: "Private payment required",
           paymentRequest: createPaymentRequest({
             receiver: umbraReceiver,
@@ -91,20 +102,26 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
         paymentSignatures: Array.isArray(req.body.paymentSignatures)
           ? req.body.paymentSignatures.filter((value: unknown): value is string => typeof value === "string")
           : [],
+        traceId: requestId,
       });
 
       if (!umbraVerification.success) {
-        console.warn("[PremiumRoute] umbra verification failed", {
+        logWarn("PremiumRoute", "umbra.verification.failed", {
+          requestId,
+          clientTraceId,
           quoteId,
           reason: umbraVerification.reason,
         });
         return res.status(400).json({
+          traceId: requestId,
           error: "umbra payment verification failed",
           details: umbraVerification.reason,
         });
       }
 
-      console.log("[PremiumRoute] umbra verification succeeded", {
+      logInfo("PremiumRoute", "umbra.verification.succeeded", {
+        requestId,
+        clientTraceId,
         quoteId,
         verifiedSignature: umbraVerification.verifiedSignature,
         amountAtomic: umbraVerification.amountAtomic,
@@ -117,6 +134,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
       });
 
       return res.json({
+        traceId: requestId,
         paidTxSignature: umbraVerification.verifiedSignature,
         ai: aiResponse,
         payment: {
@@ -137,6 +155,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
     const signedTxBase64 = (req.headers["x402-signed-tx"] as string) || null;
     if (!signedTxBase64) {
       return res.status(402).json({
+        traceId: requestId,
         message: "Payment required",
         paymentRequest: createPaymentRequest({
           receiver,
@@ -157,6 +176,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
 
     if (!verifyResult.success) {
       return res.status(400).json({
+        traceId: requestId,
         error: "payment verification failed",
         details: verifyResult.reason,
       });
@@ -169,6 +189,7 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
     });
 
     return res.json({
+      traceId: requestId,
       paidTxSignature: verifyResult.signature,
       ai: aiResponse,
       payment: {
@@ -180,9 +201,14 @@ premiumRouter.post("/", validatePremiumBody, async (req: express.Request, res: e
       },
     });
   } catch (err) {
-    console.error("premiumHandler error", err);
+    logError("PremiumRoute", "request.failed", {
+      requestId,
+      clientTraceId,
+      message: (err as Error).message,
+      stack: (err as Error).stack,
+    });
     return res
       .status(500)
-      .json({ error: "internal_error", details: (err as Error).message });
+      .json({ traceId: requestId, error: "internal_error", details: (err as Error).message });
   }
 });
