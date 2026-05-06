@@ -1,12 +1,19 @@
 import type { Metadata } from "next";
-import { Instrument_Sans } from "next/font/google";
+import { Instrument_Serif, Poppins } from "next/font/google";
 import { WalletProvider } from "../providers/WalletProvider";
-import { Navbar } from "../components/Navbar";
 import "./globals.css";
 
-const instrumentSans = Instrument_Sans({
+const instrumentSerif = Instrument_Serif({
+  weight: "400",
+  style: ["normal", "italic"],
   subsets: ["latin"],
-  variable: "--font-instrument-sans",
+  variable: "--font-instrument-serif",
+});
+
+const poppins = Poppins({
+  weight: ["400", "500"],
+  subsets: ["latin"],
+  variable: "--font-poppins",
 });
 
 export const metadata: Metadata = {
@@ -20,10 +27,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${instrumentSans.variable} font-sans antialiased text-foreground bg-background`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${instrumentSerif.variable} ${poppins.variable}`}
+    >
+      <body className="font-sans bg-white text-[#1a1a1a] antialiased">
         <WalletProvider>
-          <Navbar />
           {children}
         </WalletProvider>
       </body>

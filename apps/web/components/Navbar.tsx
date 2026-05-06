@@ -1,47 +1,77 @@
 "use client";
 
 import React from "react";
+import { cn, truncateAddress } from "../app/utils";
 import { useWallet } from "../providers/WalletProvider";
-import { truncateAddress } from "../app/utils";
 
-export function Navbar() {
+type NavbarProps = {
+  isIncognito: boolean;
+  onToggleIncognito: () => void;
+};
+
+export function Navbar({ isIncognito, onToggleIncognito }: NavbarProps) {
   const { wallet, isConnecting, connectWallet, disconnectWallet } = useWallet();
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 flex justify-center p-4">
-      <div className="w-full max-w-5xl bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-2xl px-6 py-3 flex justify-between items-center shadow-2xl">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-gradient-to-br from-[#3b82f6] to-[#2563eb] rounded-lg flex items-center justify-center">
-            <span className="text-white font-black text-lg">X</span>
-          </div>
-          <span className="text-white font-bold tracking-tight hidden sm:block">AgentX402</span>
-        </div>
+    <nav className="fixed inset-x-0 top-0 z-50 h-12 border-b border-px border-black/10 bg-white">
+      <div className="mx-auto flex h-full max-w-[640px] items-center justify-between px-6 sm:px-4">
+        <span className="font-serif-italic text-20 text-[#1a1a1a] select-none">
+          AgentX402
+        </span>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2.5">
           {!wallet ? (
             <button
+              type="button"
               onClick={connectWallet}
               disabled={isConnecting}
-              className="bg-white text-black hover:bg-[#ededed] active:scale-95 transition-all px-5 py-2 rounded-xl font-bold text-sm disabled:opacity-50 shadow-[0_0_20px_rgba(255,255,255,0.1)]"
+              className={cn(
+                "min-h-10 rounded-full border-px border-black/20 px-3.5 py-1.5",
+                "font-sans text-12 font-medium text-[#1a1a1a]",
+                "transition-colors duration-100 hover:bg-surface",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15 focus-visible:ring-offset-2",
+                "disabled:cursor-not-allowed disabled:opacity-40"
+              )}
             >
-              {isConnecting ? "Connecting..." : "Connect Wallet"}
+              {isConnecting ? "Connecting..." : "Connect wallet"}
             </button>
           ) : (
-            <div className="flex items-center gap-3">
-              <div className="hidden md:flex flex-col items-end">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-[#3b82f6]">Devnet</span>
-                <span className="text-xs font-mono text-white/60">{truncateAddress(wallet)}</span>
-              </div>
-              <button 
-                onClick={disconnectWallet}
-                className="group flex items-center gap-2 bg-white/[0.05] border border-white/10 hover:border-red-500/30 hover:bg-red-500/10 px-3 py-1.5 rounded-xl transition-all"
-                title="Disconnect Wallet"
-              >
-                <div className="w-2 h-2 bg-[#10b981] rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)] group-hover:bg-red-500 group-hover:shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-white/40 group-hover:text-red-400 transition-colors">Disconnect</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={disconnectWallet}
+              className={cn(
+                "min-h-10 rounded-full border-px border-black/20 px-3.5 py-1.5",
+                "font-sans text-12 font-medium text-[#1a1a1a]",
+                "transition-colors duration-100 hover:bg-surface",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15 focus-visible:ring-offset-2"
+              )}
+              title="Disconnect wallet"
+            >
+              {truncateAddress(wallet)}
+            </button>
           )}
+
+          <button
+            type="button"
+            onClick={onToggleIncognito}
+            className={cn(
+              "flex min-h-10 items-center gap-2 rounded-full border-px px-3.5 py-1.5",
+              "font-sans text-12 font-medium select-none",
+              "transition-all duration-200 ease-in-out",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15 focus-visible:ring-offset-2",
+              isIncognito
+                ? "border-[#1a1a1a] bg-[#1a1a1a] text-white"
+                : "border-black/20 bg-transparent text-muted hover:bg-surface"
+            )}
+          >
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full transition-colors duration-200",
+                isIncognito ? "bg-white" : "bg-muted-light"
+              )}
+            />
+            Incognito
+          </button>
         </div>
       </div>
     </nav>

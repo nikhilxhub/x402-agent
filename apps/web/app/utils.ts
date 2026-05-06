@@ -1,5 +1,9 @@
 import { Transaction } from "@solana/web3.js";
 
+export function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
 /**
  * Converts lamports to SOL string with 4 decimal places.
  */
