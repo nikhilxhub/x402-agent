@@ -16,6 +16,7 @@ import { ResponseArea } from "../components/ResponseArea";
 import { StatusBar } from "../components/StatusBar";
 import { StepIndicator } from "../components/StepIndicator";
 import { WalletBanner } from "../components/WalletBanner";
+import UmbraIncognitoSwitch from "../components/UmbraIncognitoSwitch";
 import {
   cn,
   lamportsToSol,
@@ -24,6 +25,7 @@ import {
 } from "./utils";
 import { useWallet } from "../providers/WalletProvider";
 import { createUmbraPrivatePayment } from "./umbra";
+import { Activity, Shield, Terminal as TerminalIcon, Zap } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3000";
 const RPC_URL = clusterApiUrl("devnet");
@@ -465,6 +467,7 @@ export default function Home() {
 
   return (
     <>
+      <div className="glow-mesh" />
       <Navbar
         isIncognito={isIncognito}
         onToggleIncognito={() =>
@@ -472,61 +475,96 @@ export default function Home() {
         }
       />
 
-      <main className="min-h-screen bg-white pt-12">
-        <div className="mx-auto max-w-[640px] px-6 py-8 sm:px-4">
-          <WalletBanner isIncognito={isIncognito} />
+      <main className="min-h-screen pt-24 pb-12">
+        <div className="mx-auto max-w-5xl px-6 lg:grid lg:grid-cols-12 lg:gap-12">
+          
+          {/* Left Column: UI Controls & Info */}
+          <div className="lg:col-span-5 space-y-8">
+            <div className="relative group">
+              <div className="absolute -inset-1 bg-gradient-to-r from-neon-cyan/20 to-electric-purple/20 blur opacity-25 group-hover:opacity-40 transition duration-1000"></div>
+              <UmbraIncognitoSwitch 
+                isIncognito={isIncognito} 
+                onToggle={() => setPaymentMethod(isIncognito ? "standard" : "umbra")} 
+              />
+            </div>
 
-          <div
-            className={cn(
-              "rounded-xl border-px p-5 transition-colors duration-[250ms] ease-in-out",
-              isIncognito
-                ? "border-incognito-border bg-incognito-bg"
-                : "border-black/10 bg-white"
-            )}
-          >
-            <div className="space-y-6">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className={cn(
-                    "font-sans text-10 font-medium uppercase tracking-widest",
-                    isIncognito ? "text-incognito-muted" : "text-muted-light"
-                  )}>
-                    {isIncognito ? "Private payment terminal" : "Developer payment terminal"}
-                  </p>
-                  <p className={cn(
-                    "mt-1 font-sans text-13 font-normal",
-                    isIncognito ? "text-incognito-text" : "text-muted"
-                  )}>
-                    {backendOnline ? "Backend online · devnet" : "Backend offline"}
-                  </p>
+            <div className="rounded-2xl border border-white/5 bg-dark-grey/40 backdrop-blur-xl p-6 space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 border border-white/10">
+                    <Activity className="w-5 h-5 text-neon-cyan" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-silver">System Status</p>
+                    <p className="text-sm font-bold text-ghost-white">
+                      {backendOnline ? "Network Operational" : "System Offline"}
+                    </p>
+                  </div>
                 </div>
-
-                {wallet ? (
-                  <span className={cn(
-                    "font-sans text-11 font-normal",
-                    isIncognito ? "text-incognito-muted" : "text-muted-light"
-                  )}>
-                    {truncateAddress(wallet)}
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2">
+                    <span className={cn("animate-ping absolute inline-flex h-full w-full rounded-full opacity-75", backendOnline ? "bg-neon-cyan" : "bg-red-500")}></span>
+                    <span className={cn("relative inline-flex rounded-full h-2 w-2", backendOnline ? "bg-neon-cyan" : "bg-red-500")}></span>
                   </span>
-                ) : null}
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-silver">Devnet-V1</span>
+                </div>
               </div>
 
-              <StepIndicator currentStep={currentStep} isIncognito={isIncognito} />
+              <div className="h-px w-full bg-gradient-to-r from-transparent via-white/5 to-transparent" />
 
-              <hr className={cn("border-t-px", isIncognito ? "border-incognito-border" : "border-black/10")} />
+              <div className="space-y-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-silver">Active Encryption</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-white/5 bg-white/5 p-3">
+                    <p className="text-[9px] font-bold text-muted-silver uppercase mb-1">Protocol</p>
+                    <p className="text-xs font-mono text-ghost-white">Umbra-ZK-4.0</p>
+                  </div>
+                  <div className="rounded-xl border border-white/5 bg-white/5 p-3">
+                    <p className="text-[9px] font-bold text-muted-silver uppercase mb-1">Session</p>
+                    <p className="text-xs font-mono text-ghost-white truncate">{createTraceId().split("-")[0]}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-              <form className="space-y-6" onSubmit={handleSubmit}>
-                <div className="space-y-2">
-                  <label
-                    htmlFor="model-selector"
-                    className={cn(
-                      "font-sans text-13 font-medium",
-                      isIncognito ? "text-incognito-text" : "text-[#1a1a1a]"
-                    )}
-                  >
-                    Model
-                  </label>
-                  <div id="model-selector">
+            <WalletBanner isIncognito={isIncognito} />
+          </div>
+
+          {/* Right Column: Main Terminal Flow */}
+          <div className="lg:col-span-7 mt-12 lg:mt-0">
+            <div
+              className={cn(
+                "relative rounded-3xl border border-white/10 bg-dark-grey/60 backdrop-blur-2xl p-8 transition-all duration-700",
+                isIncognito ? "shadow-[0_0_50px_rgba(153,69,255,0.1)] border-electric-purple/20" : "shadow-2xl"
+              )}
+            >
+              {/* Terminal Header Deco */}
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-neon-cyan/20 to-transparent rounded-t-3xl" />
+              
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <TerminalIcon className="w-5 h-5 text-neon-cyan" />
+                    <h2 className="text-lg font-bold text-ghost-white tracking-tight uppercase">Agent Terminal</h2>
+                  </div>
+                  {wallet && (
+                    <div className="px-3 py-1 rounded-full bg-white/5 border border-white/10 flex items-center gap-2">
+                      <div className="w-1 h-1 rounded-full bg-neon-cyan" />
+                      <span className="text-[10px] font-mono text-muted-silver">{truncateAddress(wallet)}</span>
+                    </div>
+                  )}
+                </div>
+
+                <StepIndicator currentStep={currentStep} isIncognito={isIncognito} />
+
+                <div className="h-px w-full bg-white/5" />
+
+                <form className="space-y-8" onSubmit={handleSubmit}>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black uppercase tracking-widest text-muted-silver">Select Neural Model</label>
+                      <span className="text-[10px] font-bold text-neon-cyan uppercase">{selectedModelMeta.provider}</span>
+                    </div>
                     <ModelChips
                       models={AVAILABLE_MODELS.map((model) => ({
                         id: model.id,
@@ -536,190 +574,165 @@ export default function Home() {
                       onSelect={setSelectedModel}
                       isIncognito={isIncognito}
                     />
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-black/20 border border-white/5">
+                      <Zap className="w-3.5 h-3.5 text-neon-cyan" />
+                      <p className="text-[11px] font-medium text-muted-silver">
+                        Execution Cost: <span className="text-ghost-white">{isIncognito ? selectedModelMeta.priceUsdc : selectedModelMeta.priceSol}</span>
+                      </p>
+                    </div>
                   </div>
-                  <p className={cn(
-                    "font-sans text-11 font-normal",
-                    isIncognito ? "text-incognito-muted" : "text-muted-light"
-                  )}>
-                    {selectedModelMeta.provider} · {isIncognito ? selectedModelMeta.priceUsdc : selectedModelMeta.priceSol}
-                  </p>
-                </div>
 
-                <hr className={cn("border-t-px", isIncognito ? "border-incognito-border" : "border-black/10")} />
+                  <div className="space-y-4">
+                    <label className="text-xs font-black uppercase tracking-widest text-muted-silver">Task Parameters (Prompt)</label>
+                    <div className="relative group">
+                      <textarea
+                        value={prompt}
+                        onChange={(event) => setPrompt(event.target.value)}
+                        placeholder="Define agent task sequence..."
+                        rows={5}
+                        className={cn(
+                          "w-full resize-none rounded-2xl border border-white/10 bg-black/40 px-5 py-4",
+                          "font-mono text-13 text-ghost-white placeholder:text-muted-silver/30",
+                          "transition-all duration-300 focus:outline-none focus:border-neon-cyan/50 focus:ring-1 focus:ring-neon-cyan/20",
+                          isIncognito && "focus:border-electric-purple/50 focus:ring-electric-purple/20"
+                        )}
+                        disabled={isSubmitting}
+                      />
+                      <div className="absolute bottom-4 right-4 flex items-center gap-2">
+                        <kbd className="px-2 py-1 rounded bg-white/5 border border-white/10 text-[9px] text-muted-silver">CTRL</kbd>
+                        <kbd className="px-2 py-1 rounded bg-white/5 border border-white/10 text-[9px] text-muted-silver">ENTER</kbd>
+                      </div>
+                    </div>
+                  </div>
 
-                <div className="space-y-2">
-                  <label
-                    htmlFor="prompt-input"
-                    className={cn(
-                      "font-sans text-13 font-medium",
-                      isIncognito ? "text-incognito-text" : "text-[#1a1a1a]"
-                    )}
-                  >
-                    Prompt
-                  </label>
-                  <textarea
-                    id="prompt-input"
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    placeholder="Enter your prompt..."
-                    rows={4}
-                    className={cn(
-                      "w-full resize-none rounded-lg border-px px-3.5 py-3",
-                      "font-sans text-13 font-normal placeholder:text-muted-light",
-                      "transition-colors duration-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-black/15 focus-visible:ring-offset-2",
-                      isIncognito
-                        ? "border-incognito-border bg-incognito-surface text-incognito-text placeholder:text-incognito-muted focus:border-[#444444]"
-                        : "border-black/10 bg-transparent text-[#1a1a1a] focus:border-black/25"
-                    )}
-                    disabled={isSubmitting}
-                  />
-                  <div className="mt-2 flex justify-end">
+                  <div className="flex items-center justify-between gap-6 pt-4">
+                    <div className="hidden sm:block">
+                      {isIncognito ? (
+                        <div className="flex items-center gap-2 text-electric-purple">
+                          <Shield className="w-4 h-4" />
+                          <span className="text-[10px] font-bold uppercase tracking-widest">Umbra Privacy Active</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-muted-silver/50">
+                          <Activity className="w-4 h-4" />
+                          <span className="text-[10px] font-bold uppercase tracking-widest">Standard Mode</span>
+                        </div>
+                      )}
+                    </div>
+                    
                     <button
                       type="submit"
                       disabled={isSubmitting || !backendOnline || !prompt.trim()}
                       className={cn(
-                        "min-h-10 rounded-lg px-4 py-2 font-sans text-13 font-medium",
-                        "transition-all duration-100 ease active:scale-[0.97]",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15 focus-visible:ring-offset-2",
+                        "group relative min-h-12 flex-1 overflow-hidden rounded-xl font-sans text-13 font-bold uppercase tracking-widest transition-all active:scale-[0.98]",
                         "disabled:cursor-not-allowed disabled:opacity-40",
                         isIncognito
-                          ? "border-px border-incognito-btn-border bg-incognito-btn text-incognito-text"
-                          : "bg-[#1a1a1a] text-white hover:opacity-[0.88]"
+                          ? "bg-electric-purple text-white shadow-[0_0_20px_rgba(153,69,255,0.4)] hover:shadow-[0_0_30px_rgba(153,69,255,0.6)]"
+                          : "bg-neon-cyan text-obsidian shadow-[0_0_20px_rgba(20,241,149,0.4)] hover:shadow-[0_0_30px_rgba(20,241,149,0.6)]"
                       )}
                     >
-                      {wallet
-                        ? isSubmitting
-                          ? status
-                          : "Get quote →"
-                        : "Connect wallet to continue"}
+                      <span className="relative z-10 flex items-center justify-center gap-2">
+                        {wallet ? (isSubmitting ? status : "Initialize Sequence →") : "Connect Authorized Wallet"}
+                      </span>
+                      <div className="absolute inset-0 -translate-x-full group-hover:translate-x-0 bg-white/10 transition-transform duration-500" />
                     </button>
                   </div>
-                </div>
 
-                {paymentQuote ? (
-                  <>
-                    <hr className={cn("border-t-px", isIncognito ? "border-incognito-border" : "border-black/10")} />
-                    <QuoteBlock
-                      price={formatQuoteValue(paymentQuote)}
-                      modelLabel={selectedModelMeta.name}
-                      currency={paymentQuote.paymentMethod === "umbra"
-                        ? (paymentQuote.umbra?.symbol ?? paymentQuote.currency)
-                        : "SOL"}
-                      isIncognito={isIncognito}
-                      isPhantomWallet={isPhantomWallet}
-                    />
-                    <p className={cn(
-                      "break-all font-sans text-11 font-normal",
-                      isIncognito ? "text-incognito-muted" : "text-muted-light"
-                    )}>
-                      Quote ID: {paymentQuote.quoteId || "standard-flow"}
-                    </p>
-                  </>
-                ) : null}
-
-                {quoteStatus ? (
-                  <>
-                    <hr className={cn("border-t-px", isIncognito ? "border-incognito-border" : "border-black/10")} />
-                    <StatusBar status={quoteStatus} isIncognito={isIncognito} />
-                    {error ? (
-                      <p className={cn(
-                        "font-sans text-12 font-normal",
-                        isIncognito ? "text-incognito-muted" : "text-status-error-text"
-                      )}>
-                        {error}
-                      </p>
-                    ) : null}
-                  </>
-                ) : null}
-
-                {result ? (
-                  <>
-                    <hr className={cn("border-t-px", isIncognito ? "border-incognito-border" : "border-black/10")} />
-                    <ResponseArea
-                      text={displayedResponse}
-                      isStreaming={isResponseStreaming}
-                      isIncognito={isIncognito}
-                    />
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <p className={cn(
-                          "mb-1.5 font-sans text-10 font-medium uppercase tracking-widest",
-                          isIncognito ? "text-incognito-muted" : "text-muted-light"
-                        )}>
-                          Payment proof
-                        </p>
-                        <p className={cn(
-                          "break-all font-sans text-11 font-normal",
-                          isIncognito ? "text-incognito-text" : "text-[#1a1a1a]"
-                        )}>
-                          {result.payment?.verifiedSignature || result.paidTxSignature}
-                        </p>
+                  {paymentQuote && (
+                    <div className="animate-fade-in space-y-4">
+                      <div className="h-px w-full bg-white/5" />
+                      <QuoteBlock
+                        price={formatQuoteValue(paymentQuote)}
+                        modelLabel={selectedModelMeta.name}
+                        currency={paymentQuote.paymentMethod === "umbra"
+                          ? (paymentQuote.umbra?.symbol ?? paymentQuote.currency)
+                          : "SOL"}
+                        isIncognito={isIncognito}
+                        isPhantomWallet={isPhantomWallet}
+                      />
+                      <div className="flex items-center justify-between px-4 py-2 rounded-lg bg-white/5 border border-white/5">
+                        <span className="text-[9px] font-bold text-muted-silver uppercase tracking-widest">Encryption Hash</span>
+                        <span className="text-[9px] font-mono text-ghost-white truncate max-w-[200px]">{paymentQuote.quoteId || "SHA-256-GEN"}</span>
                       </div>
-                      <div>
-                        <p className={cn(
-                          "mb-1.5 font-sans text-10 font-medium uppercase tracking-widest",
-                          isIncognito ? "text-incognito-muted" : "text-muted-light"
-                        )}>
-                          Runtime model
-                        </p>
-                        <p className={cn(
-                          "font-sans text-12 font-normal",
-                          isIncognito ? "text-incognito-text" : "text-[#1a1a1a]"
-                        )}>
-                          {selectedModelMeta.name}
-                        </p>
-                      </div>
-                      {result.payment?.method === "umbra" ? (
-                        <div>
-                          <p className={cn(
-                            "mb-1.5 font-sans text-10 font-medium uppercase tracking-widest",
-                            isIncognito ? "text-incognito-muted" : "text-muted-light"
-                          )}>
-                            Private payment amount
-                          </p>
-                          <p className={cn(
-                            "font-sans text-12 font-normal",
-                            isIncognito ? "text-incognito-text" : "text-[#1a1a1a]"
-                          )}>
-                            {formatPrivatePaymentAmount(result.payment)}
-                          </p>
-                        </div>
-                      ) : null}
-                      {result.viewingKey ? (
-                        <div>
-                          <p className={cn(
-                            "mb-1.5 font-sans text-10 font-medium uppercase tracking-widest",
-                            isIncognito ? "text-incognito-muted" : "text-muted-light"
-                          )}>
-                            Viewing key
-                          </p>
-                          <p className={cn(
-                            "break-all font-sans text-11 font-normal",
-                            isIncognito ? "text-incognito-text" : "text-[#1a1a1a]"
-                          )}>
-                            {result.viewingKey}
-                          </p>
-                        </div>
-                      ) : null}
                     </div>
-                  </>
-                ) : null}
-              </form>
-            </div>
-          </div>
+                  )}
 
-          <div className="mt-8">
-            <PromptHistory history={history} onClear={() => setHistory([])} />
-          </div>
+                  {quoteStatus && (
+                    <div className="animate-fade-in space-y-4">
+                      <div className="h-px w-full bg-white/5" />
+                      <StatusBar status={quoteStatus} isIncognito={isIncognito} />
+                      {error && (
+                        <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-4">
+                          <p className="text-xs font-medium text-red-400">{error}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
-          {isBooting ? (
-            <div className="mt-6 flex items-center gap-2 font-sans text-12 font-normal text-muted">
-              <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse-dot" />
-              Booting AgentX402...
+                  {result && (
+                    <div className="animate-fade-in space-y-6">
+                      <div className="h-px w-full bg-white/5" />
+                      <div className="flex items-center gap-2 mb-2">
+                        <Activity className="w-4 h-4 text-neon-cyan" />
+                        <h3 className="text-xs font-black uppercase tracking-widest text-ghost-white">Agent Output</h3>
+                      </div>
+                      <ResponseArea
+                        text={displayedResponse}
+                        isStreaming={isResponseStreaming}
+                        isIncognito={isIncognito}
+                      />
+                      
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-1.5 p-4 rounded-2xl bg-white/5 border border-white/5">
+                          <p className="text-[9px] font-black uppercase tracking-widest text-muted-silver">Verified Signature</p>
+                          <p className="font-mono text-[10px] text-ghost-white break-all leading-relaxed">
+                            {result.payment?.verifiedSignature || result.paidTxSignature}
+                          </p>
+                        </div>
+                        <div className="space-y-1.5 p-4 rounded-2xl bg-white/5 border border-white/5">
+                          <p className="text-[9px] font-black uppercase tracking-widest text-muted-silver">Execution Result</p>
+                          <p className="text-xs font-bold text-neon-cyan uppercase">Success - Verified</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </form>
+              </div>
             </div>
-          ) : null}
+
+            <div className="mt-8">
+              <PromptHistory history={history} onClear={() => setHistory([])} />
+            </div>
+
+            {isBooting && (
+              <div className="mt-12 flex flex-col items-center gap-4 py-8 rounded-3xl border border-white/5 bg-white/5 backdrop-blur-md">
+                <div className="relative h-12 w-12">
+                  <div className="absolute inset-0 rounded-full border-2 border-neon-cyan/20" />
+                  <div className="absolute inset-0 rounded-full border-2 border-t-neon-cyan animate-spin" />
+                </div>
+                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.3em] text-neon-cyan animate-pulse">
+                  Synchronizing Neural Links...
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </main>
+
+      <footer className="py-12 border-t border-white/5">
+        <div className="mx-auto max-w-7xl px-6 flex flex-col md:flex-row justify-between items-center gap-8">
+          <div className="flex flex-col items-center md:items-start gap-2">
+             <span className="font-serif-italic text-20 text-ghost-white">AgentX402</span>
+             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-silver">Privacy by Default · Security by Design</p>
+          </div>
+          <div className="flex gap-8">
+             <a href="#" className="text-[10px] font-bold uppercase tracking-widest text-muted-silver hover:text-neon-cyan transition-colors">Privacy Policy</a>
+             <a href="#" className="text-[10px] font-bold uppercase tracking-widest text-muted-silver hover:text-neon-cyan transition-colors">Terms of Service</a>
+             <a href="#" className="text-[10px] font-bold uppercase tracking-widest text-muted-silver hover:text-neon-cyan transition-colors">GitHub</a>
+          </div>
+        </div>
+      </footer>
     </>
   );
 }
+

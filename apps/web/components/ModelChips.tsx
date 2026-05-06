@@ -2,6 +2,7 @@
 
 import React from "react";
 import { cn } from "../app/utils";
+import { Cpu } from "lucide-react";
 
 type Model = {
   id: string;
@@ -20,7 +21,7 @@ export function ModelChips({
   isIncognito: boolean;
 }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap gap-2">
       {models.map((model) => {
         const selected = selectedModel === model.id;
 
@@ -30,22 +31,31 @@ export function ModelChips({
             type="button"
             onClick={() => onSelect(model.id)}
             className={cn(
-              "min-h-10 rounded-full border-px px-3.5 py-1.5",
-              "font-sans text-12 font-medium transition-colors duration-[120ms] ease",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15 focus-visible:ring-offset-2",
+              "relative flex items-center gap-2 rounded-xl border px-4 py-2.5 transition-all duration-300",
+              "font-sans text-12 font-bold uppercase tracking-wider group",
               selected
                 ? isIncognito
-                  ? "border-[#444444] bg-[#333333] text-incognito-text"
-                  : "border-[#1a1a1a] bg-[#1a1a1a] text-white"
-                : isIncognito
-                  ? "border-incognito-border bg-transparent text-incognito-muted hover:bg-incognito-surface"
-                  : "border-black/20 bg-transparent text-muted hover:bg-surface"
+                  ? "border-electric-purple/50 bg-electric-purple/10 text-ghost-white shadow-[0_0_15px_rgba(153,69,255,0.1)]"
+                  : "border-neon-cyan/50 bg-neon-cyan/10 text-ghost-white shadow-[0_0_15px_rgba(20,241,149,0.1)]"
+                : "border-white/5 bg-white/5 text-muted-silver hover:bg-white/10 hover:border-white/20"
             )}
           >
+            {selected && (
+              <Cpu className={cn("w-3.5 h-3.5", isIncognito ? "text-electric-purple" : "text-neon-cyan")} />
+            )}
             {model.label}
+            
+            {/* Corner Deco */}
+            {selected && (
+              <div className={cn(
+                "absolute -top-[1px] -right-[1px] w-2 h-2 border-t border-r rounded-tr-sm transition-colors",
+                isIncognito ? "border-electric-purple" : "border-neon-cyan"
+              )} />
+            )}
           </button>
         );
       })}
     </div>
   );
 }
+
