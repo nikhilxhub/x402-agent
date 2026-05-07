@@ -8,8 +8,10 @@ import {
   Transaction,
   clusterApiUrl,
 } from "@solana/web3.js";
+import Image from "next/image";
 import { lamportsToSol, serializeTransactionToBase64 } from "./utils";
 import { useWallet } from "../providers/WalletProvider";
+import { useUmbra } from "../providers/UmbraProvider";
 import { createUmbraPrivatePayment } from "./umbra";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3000";
@@ -104,18 +106,24 @@ function formatPrivatePaymentAmount(payment: NonNullable<AIResponse["payment"]>)
 
 export default function Home() {
   const { wallet, connectWallet, signTransaction } = useWallet();
+  const { paymentMethod, setPaymentMethod } = useUmbra();
   const [isBooting, setIsBooting] = useState(true);
   const [backendOnline, setBackendOnline] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [selectedModel, setSelectedModel] = useState<string>(AVAILABLE_MODELS[0]!.id);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("standard");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
   const [paymentQuote, setPaymentQuote] = useState<PaymentRequest | null>(null);
   const [result, setResult] = useState<AIResponse | null>(null);
+  const [greeting, setGreeting] = useState("Good afternoon");
 
   useEffect(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) setGreeting("Good morning");
+    else if (hour < 18) setGreeting("Good afternoon");
+    else setGreeting("Good evening");
+
     async function checkHealth() {
       try {
         const res = await fetch(`${BACKEND_URL}/health`);
@@ -218,8 +226,8 @@ export default function Home() {
     };
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(e?: FormEvent) {
+    if (e) e.preventDefault();
     if (!wallet) {
       await connectWallet();
       return;
@@ -334,188 +342,148 @@ export default function Home() {
     );
   }
 
+  const selectedModelData = AVAILABLE_MODELS.find(m => m.id === selectedModel) || AVAILABLE_MODELS[0]!;
+
   return (
-    <main className="min-h-screen bg-[#0a0a0a] text-[#f5f5f5] selection:bg-[#3b82f6]/30 px-4 py-12 md:py-20 flex justify-center overflow-x-hidden relative">
+    <main className="min-h-screen bg-[#0a0a0a] text-[#f5f5f5] selection:bg-[#3b82f6]/30 px-4 py-12 md:py-24 flex justify-center overflow-x-hidden relative">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-20%] left-1/2 -translate-x-1/2 w-full h-[70%] bg-[radial-gradient(circle_at_50%_0%,rgba(59,130,246,0.15),transparent_70%)]"></div>
-        <div className="absolute bottom-0 left-0 w-1/2 h-1/2 bg-[radial-gradient(circle_at_0%_100%,rgba(59,130,246,0.05),transparent_50%)]"></div>
+        <div className="absolute top-[-20%] left-1/2 -translate-x-1/2 w-full h-[70%] bg-[radial-gradient(circle_at_50%_0%,rgba(59,130,246,0.1),transparent_70%)]"></div>
       </div>
 
-      <div className="w-full max-width-[800px] max-w-2xl flex flex-col gap-12 z-10 animate-in fade-in slide-in-from-bottom-3 duration-1000">
-        <header className="text-center">
-          <p className="text-[10px] sm:text-xs font-bold uppercase tracking-[0.2em] text-[#3b82f6] mb-3">AI Payment Protocol</p>
-          <h1 className="text-4xl sm:text-6xl font-black tracking-tight mb-4 bg-gradient-to-b from-white to-[#a5a5a5] bg-clip-text text-transparent">
-            AgentX402
-          </h1>
-          <p className="text-[#a0a0a0] text-sm sm:text-base max-w-lg mx-auto leading-relaxed">
-            Pay per prompt with standard Solana transfers or experimental Umbra private payments.
-          </p>
-        </header>
+      <div className="w-full max-w-3xl flex flex-col gap-10 z-10 animate-in fade-in slide-in-from-bottom-4 duration-1000">
+        <div className="flex flex-col items-center text-center gap-6">
+          <div className="flex items-center gap-4">
+            
+            <h1 className="font-serif text-4xl md:text-5xl text-white/90 tracking-tight">
+              {greeting}
+            </h1>
+          </div>
+        </div>
 
-        <section className="flex flex-col gap-6">
-          <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-[32px] p-6 sm:p-8 hover:border-white/20 transition-all duration-500 shadow-2xl">
-            <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
-              <h2 className="text-lg font-semibold tracking-tight">Control Center</h2>
-              <div className="flex items-center gap-2 px-3 py-1 bg-white/[0.05] rounded-full border border-white/5">
-                <div className={`w-2 h-2 rounded-full ${backendOnline ? "bg-[#10b981] shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-[#ef4444]"}`}></div>
-                <span className="text-[10px] font-medium text-[#a0a0a0]">Backend {backendOnline ? "Online" : "Offline"}</span>
+        <div className="relative group">
+          <div className={`absolute -inset-1 rounded-[32px] blur-xl transition-all duration-1000 opacity-20 ${paymentMethod === "umbra" ? "bg-blue-600/40 opacity-30" : "bg-white/10"}`}></div>
+          <div className="relative bg-[#111111] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl">
+            <textarea
+              className="w-full bg-transparent px-8 pt-8 pb-20 text-lg md:text-xl font-poppins font-light focus:outline-none min-h-[180px] resize-none placeholder:text-white/10"
+              placeholder="How can AgentX402 help you today?"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              disabled={isSubmitting}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit();
+                }
+              }}
+            />
+            
+            <div className="absolute bottom-4 left-6 right-6 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                 <button
+                  type="button"
+                  onClick={() => setPaymentMethod(paymentMethod === "standard" ? "umbra" : "standard")}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all duration-300 border ${paymentMethod === "umbra" ? "bg-blue-500/10 border-blue-500/30 text-blue-400" : "bg-white/5 border-white/5 text-white/40 hover:bg-white/10"}`}
+                >
+                  <div className={`w-1.5 h-1.5 rounded-full ${paymentMethod === "umbra" ? "bg-blue-400 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.8)]" : "bg-white/20"}`}></div>
+                  <span className="text-[10px] font-poppins font-bold uppercase tracking-wider">
+                    {paymentMethod === "umbra" ? "Umbra Private" : "Standard"}
+                  </span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="relative group/model">
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    disabled={isSubmitting}
+                    className="appearance-none bg-white/5 hover:bg-white/10 border border-white/5 px-4 py-1.5 pr-8 rounded-full text-xs font-poppins font-medium text-white/60 cursor-pointer transition-all focus:outline-none"
+                  >
+                    {AVAILABLE_MODELS.map(m => (
+                      <option key={m.id} value={m.id} className="bg-[#111111] text-white">
+                        {m.name} ({paymentMethod === "umbra" ? m.priceUsdc : m.priceSol})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none opacity-40">
+                    <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleSubmit()}
+                  disabled={isSubmitting || !prompt.trim()}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 ${isSubmitting || !prompt.trim() ? "bg-white/5 text-white/10" : "bg-white text-black hover:scale-110 active:scale-95 shadow-[0_0_20px_rgba(255,255,255,0.2)]"}`}
+                >
+                  {isSubmitting ? (
+                    <div className="w-4 h-4 border-2 border-black/10 border-t-black rounded-full animate-spin"></div>
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="22" y1="2" x2="11" y2="13"></line>
+                      <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="bg-[#ef4444]/10 border border-[#ef4444]/20 text-[#ef4444] text-xs p-4 rounded-2xl flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
+            <span className="font-bold shrink-0 mt-0.5">Error:</span>
+            <span>{error}</span>
+          </div>
+        )}
+
+        {status !== "Ready" && status !== "Completed" && status !== "Failed" && isSubmitting && (
+           <div className="flex items-center justify-center gap-3 text-white/40 font-poppins text-xs animate-pulse">
+             <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+             {status}
+           </div>
+        )}
+
+        {result && (
+          <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/[0.08] rounded-[32px] p-8 animate-in slide-in-from-bottom-8 duration-700 shadow-2xl relative overflow-hidden">
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex items-center gap-3">
+                 <div className="w-6 h-6 relative bg-white/5 rounded flex items-center justify-center p-1">
+                   <Image src="/image.png" alt="Icon" width={16} height={16} className="object-contain opacity-50" />
+                 </div>
+                 <h2 className="text-sm font-semibold tracking-tight text-white/60 font-poppins">Intelligence Output</h2>
+              </div>
+              <div className="px-3 py-1 bg-[#10b981]/10 text-[#10b981] rounded-full text-[10px] font-bold uppercase tracking-wider border border-[#10b981]/20 font-poppins">
+                {result.payment?.method === "umbra" ? "Verified Private" : "Verified Standard"}
               </div>
             </div>
 
-            <form className="flex flex-col gap-8" onSubmit={handleSubmit}>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-[#a0a0a0] ml-1">Payment Rail</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    className={`rounded-2xl border px-4 py-3 text-left transition-all ${paymentMethod === "standard" ? "border-[#3b82f6] bg-[#3b82f6]/10" : "border-white/[0.08] bg-white/[0.03]"}`}
-                    onClick={() => setPaymentMethod("standard")}
-                    disabled={isSubmitting}
-                  >
-                    <span className="block text-sm font-semibold">Standard</span>
-                    <span className="block text-[11px] text-white/40 mt-1">Native SOL transfer, fast verification.</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`rounded-2xl border px-4 py-3 text-left transition-all ${paymentMethod === "umbra" ? "border-[#10b981] bg-[#10b981]/10" : "border-white/[0.08] bg-white/[0.03]"}`}
-                    onClick={() => setPaymentMethod("umbra")}
-                    disabled={isSubmitting}
-                  >
-                    <span className="block text-sm font-semibold">Private</span>
-                    <span className="block text-[11px] text-white/40 mt-1">Umbra private UTXO payment using devnet dUSDC.</span>
-                  </button>
-                </div>
-              </div>
+            <div className="text-[#ededed] leading-relaxed text-base font-poppins whitespace-pre-wrap selection:bg-[#3b82f6]/40">
+              {result.ai}
+            </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-[#a0a0a0] ml-1">AI Intelligence Layer</label>
-                <div className="grid grid-cols-1 gap-2">
-                  {AVAILABLE_MODELS.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => setSelectedModel(m.id)}
-                      disabled={isSubmitting}
-                      className={`flex items-center justify-between px-4 py-3 rounded-2xl border text-left transition-all ${selectedModel === m.id ? "border-[#3b82f6] bg-[#3b82f6]/10" : "border-white/[0.08] bg-white/[0.03] hover:border-white/20"}`}
-                    >
-                      <div>
-                        <span className="block text-sm font-semibold">{m.name}</span>
-                        <span className="block text-[11px] text-white/40 mt-0.5">{m.provider}</span>
-                      </div>
-                      <span className="text-[11px] font-mono text-white/50 shrink-0 ml-3">
-                        {paymentMethod === "umbra" ? m.priceUsdc : m.priceSol}
-                      </span>
-                    </button>
-                  ))}
-                </div>
+            <div className="mt-8 pt-6 border-t border-white/5 flex flex-wrap gap-6">
+              <div className="flex-1 min-w-[200px]">
+                <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1 font-poppins">Payment Proof</span>
+                <span className="text-[11px] font-mono break-all text-white/30 block leading-tight">{result.payment?.verifiedSignature || result.paidTxSignature}</span>
               </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-[#a0a0a0] ml-1">Context / Prompt</label>
-                <textarea
-                  className="w-full bg-white/[0.05] border border-white/[0.08] rounded-2xl px-4 py-4 text-sm min-h-[140px] focus:outline-none focus:border-[#3b82f6] transition-all disabled:opacity-50 placeholder:text-white/20"
-                  placeholder="Input your challenge for the model..."
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  disabled={isSubmitting}
-                />
+              <div className="flex-1 min-w-[150px]">
+                 <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1 font-poppins">Model Used</span>
+                 <span className="text-xs font-medium text-white/60 font-poppins">{selectedModel}</span>
               </div>
-
-              {paymentQuote && (
-                <div className="bg-[#3b82f6]/10 border border-[#3b82f6]/20 rounded-2xl p-5 space-y-3 animate-in zoom-in-95 duration-300">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-[#a0a0a0]">Inference Fee</span>
-                    <span className="font-semibold text-[#3b82f6]">{formatQuoteAmount(paymentQuote)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-[#a0a0a0]">Payment Rail</span>
-                    <span className="text-white/70">{paymentQuote.paymentMethod === "umbra" ? "Umbra private mixer" : "Native Solana transfer"}</span>
-                  </div>
-                  <div className="pt-2 border-t border-white/5 text-[10px] text-white/30 break-all">
-                    Quote ID: {paymentQuote.quoteId || "standard-flow"}
-                  </div>
+              {result.viewingKey && (
+                <div className="w-full">
+                  <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1 font-poppins">Viewing Key</span>
+                  <span className="text-[11px] font-mono break-all text-white/30 block leading-tight">{result.viewingKey}</span>
                 </div>
               )}
-
-              <button
-                type="submit"
-                className="w-full bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-white/5 disabled:text-white/20 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl transition-all active:scale-[0.98] flex items-center justify-center gap-3 overflow-hidden"
-                disabled={isSubmitting || !backendOnline || !prompt.trim()}
-              >
-                {isSubmitting ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                    <span className="text-sm tracking-tight">{status}</span>
-                  </>
-                ) : (
-                  <span className="tracking-tight">
-                    {wallet
-                      ? paymentMethod === "umbra"
-                        ? "Dispatch Private Request"
-                        : "Dispatch Request"
-                      : "Connect Wallet to Dispatch"}
-                  </span>
-                )}
-              </button>
-            </form>
-
-            {error && (
-              <div className="mt-6 bg-[#ef4444]/10 border border-[#ef4444]/20 text-[#ef4444] text-xs p-4 rounded-xl flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
-                <span className="font-bold shrink-0 mt-0.5">Error:</span>
-                <span>{error}</span>
-              </div>
-            )}
-          </div>
-
-          {result && (
-            <div className="bg-white/[0.03] backdrop-blur-3xl border border-white/[0.08] rounded-[32px] p-6 sm:p-8 animate-in slide-in-from-bottom-8 duration-700 shadow-2xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
-                <svg width="100" height="100" viewBox="0 0 100 100" fill="none">
-                  <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="1" />
-                </svg>
-              </div>
-
-              <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
-                <h2 className="text-lg font-semibold tracking-tight">Intelligence Output</h2>
-                <div className="px-3 py-1 bg-[#10b981]/10 text-[#10b981] rounded-full text-[10px] font-bold uppercase tracking-wider border border-[#10b981]/20">
-                  {result.payment?.method === "umbra" ? "Verified Private Payment" : "Verified Settlement"}
-                </div>
-              </div>
-
-              <div className="text-[#ededed] leading-relaxed text-sm sm:text-base whitespace-pre-wrap selection:bg-[#3b82f6]/40">
-                {result.ai}
-              </div>
-
-              <div className="mt-10 pt-8 border-t border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div>
-                  <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Payment Proof</span>
-                  <span className="text-[11px] font-mono break-all text-white/50 block leading-tight">{result.payment?.verifiedSignature || result.paidTxSignature}</span>
-                </div>
-                <div>
-                  <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Runtime Model</span>
-                  <span className="text-sm font-medium text-white/80">{selectedModel}</span>
-                </div>
-                {result.payment?.method === "umbra" && (
-                  <div>
-                    <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Private Payment Amount</span>
-                    <span className="text-sm font-medium text-white/80">
-                      {formatPrivatePaymentAmount(result.payment)}
-                    </span>
-                  </div>
-                )}
-                {result.viewingKey && (
-                  <div>
-                    <span className="block text-[10px] uppercase tracking-widest text-[#a0a0a0] mb-1.5">Viewing Key</span>
-                    <span className="text-[11px] font-mono break-all text-white/50 block leading-tight">{result.viewingKey}</span>
-                  </div>
-                )}
-              </div>
             </div>
-          )}
-        </section>
+          </div>
+        )}
 
-        <footer className="text-center pb-8 opacity-20 hover:opacity-100 transition-opacity duration-1000">
-          <p className="text-[10px] tracking-widest uppercase">Protocol x402 • Agentic AI Proof of Stake</p>
+        <footer className="text-center pt-8 opacity-20 hover:opacity-100 transition-opacity duration-1000">
+          <p className="text-[10px] font-poppins tracking-[0.3em] uppercase">Protocol x402 • Agentic AI Layer</p>
         </footer>
       </div>
     </main>
