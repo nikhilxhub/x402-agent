@@ -10,8 +10,16 @@ export function Navbar() {
   const { wallet, isConnecting, connectWallet, disconnectWallet } = useWallet();
   const { isIncognito, toggleIncognito } = useUmbra();
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [showHint, setShowHint] = useState(false);
+
+  React.useEffect(() => {
+    // Show hint after 2 seconds if not incognito
+    const timer = setTimeout(() => setShowHint(true), 2000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleToggle = () => {
+    setShowHint(false);
     setIsTransitioning(true);
     setTimeout(() => {
       toggleIncognito();
@@ -27,7 +35,7 @@ export function Navbar() {
         <div className={`absolute bottom-0 left-0 w-full h-1/2 bg-black transition-transform duration-500 ease-in-out ${isTransitioning ? "translate-y-0" : "-translate-y-full"}`}></div>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <div className={`w-24 h-24 relative transition-all duration-500 ${isTransitioning ? "scale-100 opacity-100" : "scale-50 opacity-0"}`}>
-             <Image src="/image.png" alt="AgentX402" fill className="object-contain" />
+             <Image src="/image.png" alt="Agentx402" fill className="object-contain" />
           </div>
           <div className={`mt-4 h-px bg-blue-500 shadow-[0_0_20px_rgba(59,130,246,1)] transition-all duration-700 ${isTransitioning ? "w-48 opacity-100" : "w-0 opacity-0"}`}></div>
           <span className={`mt-2 font-serif italic text-blue-400 tracking-widest transition-opacity duration-700 ${isTransitioning ? "opacity-100" : "opacity-0"}`}>
@@ -53,15 +61,40 @@ export function Navbar() {
         </div>
 
         <div className="flex items-center gap-6">
-          <button
-            onClick={handleToggle}
-            className={`flex items-center gap-2 px-3 py-1 rounded-full transition-all duration-300 border ${isIncognito ? "bg-blue-500/10 border-blue-500/50" : "bg-white/5 border-white/5 hover:bg-white/10"}`}
-          >
-            <div className={`w-2 h-2 rounded-full transition-all duration-500 ${isIncognito ? "bg-blue-400 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.8)]" : "bg-white/20"}`}></div>
-            <span className={`text-[10px] font-poppins font-bold uppercase tracking-wider ${isIncognito ? "text-blue-400" : "text-white/40"}`}>
-              {isIncognito ? "Private" : "Incognito"}
-            </span>
-          </button>
+          <div className="relative">
+            {showHint && (
+              <div className="absolute top-full mt-4 left-1/2 -translate-x-1/2 animate-float animate-in fade-in zoom-in-95 duration-500">
+                <div className="bg-white/10 backdrop-blur-2xl border border-white/20 rounded-[20px] px-4 py-2 shadow-[0_10px_30px_rgba(0,0,0,0.4)] relative">
+                  {/* Cloud tail pointing up */}
+                  <div className="absolute bottom-[95%] left-1/2 -translate-x-1/2 w-3 h-3 bg-[#1a1a1a] border-l border-t border-white/20 rotate-45"></div>
+                  <div className="flex items-center gap-2 whitespace-nowrap">
+                    <span className="text-[10px] font-poppins font-semibold text-white/90 flex items-center gap-1.5">
+                    Use <span className="text-blue-300">Solflare / Umbra</span> for best Incognito experience
+                    </span>
+                    <button 
+                      onClick={() => setShowHint(false)}
+                      className="ml-1 text-white/30 hover:text-white/60 transition-colors"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <button
+              onClick={handleToggle}
+              onMouseEnter={() => setShowHint(true)}
+              className={`flex items-center gap-2 px-3 py-1 rounded-full transition-all duration-300 border ${isIncognito ? "bg-blue-500/10 border-blue-500/50" : "bg-white/5 border-white/5 hover:bg-white/10"}`}
+            >
+              <div className={`w-2 h-2 rounded-full transition-all duration-500 ${isIncognito ? "bg-blue-400 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.8)]" : "bg-white/20"}`}></div>
+              <span className={`text-[10px] font-poppins font-bold uppercase tracking-wider ${isIncognito ? "text-blue-400" : "text-white/40"}`}>
+                {isIncognito ? "Private" : "Incognito"}
+              </span>
+            </button>
+          </div>
 
           <div className="h-4 w-px bg-white/10 hidden md:block"></div>
 

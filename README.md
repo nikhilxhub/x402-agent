@@ -70,5 +70,23 @@ Robust backend services for checking Solana transaction status and Umbra payment
    npm run dev
    ```
 
+4. **Umbra Wallet Registration**:
+   To receive or send private payments via Umbra, your wallet must be registered on-chain.
+
+   **Platform Registration**: 
+   If you are setting up the backend platform wallet (`DEFAULT_OWNER`), run the following command from the backend directory:
+   ```bash
+   cd apps/backend
+   pnpm run register-platform
+   ```
+
+   **User Wallet Registration**:
+   For developers integrating user registration in the frontend, use the following SDK pattern:
+   ```typescript
+   const register = getUserRegistrationFunction({ client }, { zkProver });
+   await register({ confidential: true, anonymous: true });
+   ```
+   This is a one-time process per wallet. If a wallet is not registered, you will encounter a `Receiver is not registered` error.
+
 ---
 Built with intensity by the x402 team.
